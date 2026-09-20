@@ -1,0 +1,81 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and verification submission",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "email": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "name": { "type": "string", "maxLength": 100 },
+        "middleName": { "type": "string", "maxLength": 100 },
+        "surname": { "type": "string", "maxLength": 100 },
+        "dob": { "type": "string", "maxLength": 50 },
+        "address": { "type": "string", "maxLength": 300 },
+        "location": { "type": "string", "maxLength": 100 },
+        "province": { "type": "string", "maxLength": 100 },
+        "contactNumber": { "type": "string", "maxLength": 50 },
+        "bio": { "type": "string", "maxLength": 1000 },
+        "profilePhoto": { "type": "string", "maxLength": 500000 },
+        "verificationStatus": { "type": "string", "enum": ["none", "pending", "approved", "rejected"] },
+        "monthlyProfit": { "type": "number" },
+        "isTenant": { "type": "boolean" },
+        "tenantStatus": { "type": "string", "enum": ["active", "inactive"] },
+        "createdAt": { "type": "string" },
+        "submittedAt": { "type": "string" }
+      },
+      "required": ["uid", "email"]
+    },
+    "AgreementForm": {
+      "title": "Agreement Form",
+      "description": "User agreement document",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "uid": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 },
+        "content": { "type": "string", "maxLength": 5000 },
+        "status": { "type": "string", "enum": ["signed", "unsigned"] },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["id", "uid", "title"]
+    },
+    "Admin": {
+      "title": "Admin",
+      "description": "Admin user record",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 256 }
+      },
+      "required": ["uid", "email"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": {
+        "$ref": "#/entities/User"
+      },
+      "description": "User profiles"
+    },
+    "/users/{userId}/agreements/{agreementId}": {
+      "schema": {
+        "$ref": "#/entities/AgreementForm"
+      },
+      "description": "User agreement forms"
+    },
+    "/admins/{adminId}": {
+      "schema": {
+        "$ref": "#/entities/Admin"
+      },
+      "description": "Admin records"
+    }
+  }
+}

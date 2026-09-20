@@ -1,0 +1,7 @@
+{
+  "name": "Tenant & User Verification Portal",
+  "description": "Tenant and user verification portal with live OpenStreetMap geolocation and admin tools.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+

@@ -1,0 +1,51 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'timegig2026@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId) && (userId == request.auth.uid || isAdmin());
+      allow list: if isSignedIn() && isAdmin();
+      allow create: if isSignedIn() && isValidId(userId) && userId == request.auth.uid;
+      allow update: if isSignedIn() && isValidId(userId) && (
+        (userId == request.auth.uid && incoming().uid == existing().uid) ||
+        isAdmin()
+      );
+      allow delete: if isSignedIn() && isValidId(userId) && (userId == request.auth.uid || isAdmin());
+    }
+
+    match /users/{userId}/agreements/{agreementId} {
+      allow read, write: if isSignedIn() && isValidId(userId) && (userId == request.auth.uid || isAdmin());
+    }
+
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+  }
+}
