@@ -98,6 +98,23 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    match /gigs/{gigId} {
+      allow list: if isSignedIn();
+      allow get: if isSignedIn();
+      allow create: if isSignedIn() && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'creator' && 
+                       isValidId(gigId) &&
+                       incoming().keys().hasAll(['id', 'creatorId', 'title', 'lat', 'lng']) &&
+                       incoming().keys().hasOnly(['id', 'creatorId', 'title', 'description', 'price', 'lat', 'lng', 'createdAt']) &&
+                       incoming().creatorId == request.auth.uid;
+      allow update: if false;
+      allow delete: if isAdmin();
+      
+      match /applications/{applicationId} {
+         allow read: if isSignedIn() && (request.auth.uid == get(/databases/$(database)/documents/gigs/$(gigId)).data.creatorId || request.auth.uid == resource.data.seekerId);
+         allow create: if isSignedIn() && isValidId(applicationId) && request.auth.uid == incoming().seekerId;
+      }
+    }
+
     match /test/connection {
       allow read: if isSignedIn();
     }

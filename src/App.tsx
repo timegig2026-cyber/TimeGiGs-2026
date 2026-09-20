@@ -14,6 +14,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import firebaseConfig from '../firebase-applet-config.json';
 import { SocialLink, UserProfile, TenantSubTab, UserActivity } from './types';
 import { TenantPortalView } from './components/TenantPortalView';
+import { CreateGigModal } from './components/CreateGigModal';
+import { Gig } from './types';
 
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
@@ -46,10 +48,11 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   window.dispatchEvent(new CustomEvent('app-error', { detail: errInfo }));
 }
 
-function GigMapComponent() {
+function GigMapComponent({ setCreatingGigAt, userRole, gigs }: { setCreatingGigAt: (coords: { lat: number, lng: number } | null) => void, userRole: string, gigs: Gig[] }) {
   const mapRef = React.useRef<HTMLDivElement>(null);
   const mapInstanceRef = React.useRef<L.Map | null>(null);
   const markerRef = React.useRef<L.Marker | null>(null);
+  const gigMarkersRef = React.useRef<L.Marker[]>([]);
   const initTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const invalidateTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const isMountedRef = React.useRef<boolean>(true);
@@ -221,6 +224,12 @@ function GigMapComponent() {
           }
         });
 
+        map.on('click', (e: L.LeafletMouseEvent) => {
+            if (userRole === 'creator') {
+                setCreatingGigAt({ lat: e.latlng.lat, lng: e.latlng.lng });
+            }
+        });
+
         // Trigger size invalidation after a short delay to account for React rendering
         setTimeout(() => {
           if (isMountedRef.current && mapInstanceRef.current) {
@@ -232,6 +241,27 @@ function GigMapComponent() {
       } catch (err) {
         console.error('Leaflet instantiation guarded:', err);
       }
+    }
+
+    // Render gigs
+    if (mapInstanceRef.current) {
+      gigMarkersRef.current.forEach(m => m.remove());
+      gigMarkersRef.current = [];
+      gigs.forEach(gig => {
+        const marker = L.marker([gig.lat, gig.lng]).addTo(mapInstanceRef.current!);
+        const div = document.createElement('div');
+        div.innerHTML = `<b>${gig.title}</b><br/>Price: $${gig.price}<br/>`;
+        const btn = document.createElement('button');
+        btn.innerText = 'Apply';
+        btn.className = 'px-2 py-1 bg-emerald-600 text-white rounded text-xs mt-2';
+        btn.onclick = () => {
+             // We can handle application logic here or via props
+             alert('Applied to ' + gig.title);
+        };
+        div.appendChild(btn);
+        marker.bindPopup(div);
+        gigMarkersRef.current.push(marker);
+      });
     }
 
     return () => {
@@ -542,12 +572,48 @@ export default function App() {
   const [successModal, setSuccessModal] = useState(false);
   const [isProfileUnlocked, setIsProfileUnlocked] = useState(false);
   const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
-  const [roleChoice, setRoleChoice] = useState<'seeker' | 'creator'>('seeker');
+  const [isSeeker, setIsSeeker] = useState(false);
+  const [isCreator, setIsCreator] = useState(false);
   const [activities, setActivities] = useState<UserActivity[]>([]);
   const [loadingActivities, setLoadingActivities] = useState(false);
-  const [userRole, setUserRole] = useState<'admin' | 'user'>('user');
+  const [userRole, setUserRole] = useState<'admin' | 'user' | 'seeker' | 'creator'>('user'); // Keep this for legacy compatibility for now, but rely on new state.
+  const [currentUserProfile, setCurrentUserProfile] = useState<UserProfile | null>(null);
   const [seekers, setSeekers] = useState<UserProfile[]>([]);
   const [loadingSeekers, setLoadingSeekers] = useState(false);
+  const [gigs, setGigs] = useState<Gig[]>([]);
+  const [creatingGigAt, setCreatingGigAt] = useState<{lat: number, lng: number} | null>(null);
+
+  useEffect(() => {
+    if (!currentUser) return;
+    const fetchGigs = async () => {
+      const q = query(collection(db, 'gigs'));
+      const snapshot = await getDocs(q);
+      setGigs(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Gig)));
+    };
+    fetchGigs();
+  }, [currentUser]);
+
+  const handleCreateGig = async (gigData: { title: string; description: string; price: number }) => {
+    if (!currentUser || !creatingGigAt) return;
+    try {
+      const gigRef = doc(collection(db, 'gigs'));
+      const newGig: Gig = {
+        id: gigRef.id,
+        creatorId: currentUser.uid,
+        title: gigData.title,
+        description: gigData.description,
+        price: gigData.price,
+        lat: creatingGigAt.lat,
+        lng: creatingGigAt.lng,
+        createdAt: new Date().toISOString(),
+      };
+      await setDoc(gigRef, newGig);
+      setGigs(prev => [...prev, newGig]);
+      setCreatingGigAt(null);
+    } catch (e) {
+      console.error('Gig creation failed:', e);
+    }
+  };
 
   const resetUserState = () => {
     setName('');
@@ -571,7 +637,8 @@ export default function App() {
     setTenantProfitInput('0');
     setSubmittedAt(null);
     setIsProfileUnlocked(true);
-    setRoleChoice('seeker');
+    setIsSeeker(true);
+    setIsCreator(false);
     setActivities([]);
     setAllUsers([]);
     setUserRole('user');
@@ -704,9 +771,13 @@ export default function App() {
             }
             
             // Force-synchronize role from multiple sources
-            setUserRole(isSystemAdmin || data.role === 'admin' ? 'admin' : 'user');
-            setRoleChoice(data.role === 'creator' ? 'creator' : 'seeker');
+            const loadedRoles = data.roles || (data.role ? [data.role] : []);
+            setIsSeeker(loadedRoles.includes('seeker'));
+            setIsCreator(loadedRoles.includes('creator'));
+            
+            setUserRole(isSystemAdmin || data.role === 'admin' ? 'admin' : (loadedRoles.includes('creator') ? 'creator' : (loadedRoles.includes('seeker') ? 'seeker' : 'user')));
             setName(data.name || '');
+            setCurrentUserProfile(data);
             setMiddleName(data.middleName || '');
             setSurname(data.surname || '');
             setDob(data.dob || '');
@@ -937,8 +1008,9 @@ export default function App() {
     if (!currentUser) return;
 
     // Halt Accidental Role Flipping: Add explicit user confirmation intercept
-    const currentActualRole = userRole === 'admin' ? 'admin' : roleChoice;
-    if (verificationStatus === 'approved' && roleChoice !== currentActualRole) {
+    const primaryRole = isCreator ? 'creator' : 'seeker';
+    const currentActualRole = userRole === 'admin' ? 'admin' : primaryRole;
+    if (verificationStatus === 'approved' && primaryRole !== currentActualRole) {
       const confirmChange = window.confirm('You are an approved user. Changing your primary role (Seeker/Creator) will require a full profile re-verification and your current verification badge will be stripped. Do you wish to continue?');
       if (!confirmChange) return;
     }
@@ -947,12 +1019,11 @@ export default function App() {
     const submissionTime = new Date().toISOString();
 
     try {
-      const docSnap = await getDoc(userRef);
-      const existingData = docSnap.exists() ? docSnap.data() as UserProfile : null;
+      const existingData = currentUserProfile;
 
       // Guard Privilege Preferences: Protect admin roles from accidental downgrades
       const currentRoleInDb = existingData?.role || 'user';
-      const resolvedRole: UserProfile['role'] = currentRoleInDb === 'admin' ? 'admin' : roleChoice;
+      const resolvedRole: UserProfile['role'] = currentRoleInDb === 'admin' ? 'admin' : (isCreator ? 'creator' : 'seeker');
 
       // Bulletproof Identity Preservation Validation: Deep content matching
       let resolvedStatus: UserProfile['verificationStatus'] = 'pending';
@@ -997,6 +1068,7 @@ export default function App() {
         idDocuments,
         socialLinks,
         skills,
+        roles: [isSeeker ? 'seeker' : null, isCreator ? 'creator' : null].filter(Boolean) as string[],
         role: resolvedRole,
         verificationStatus: resolvedStatus,
         monthlyProfit: monthlyProfit || 0,
@@ -1007,6 +1079,7 @@ export default function App() {
       };
 
       await setDoc(userRef, profileData, { merge: true });
+      setCurrentUserProfile(profileData);
       logActivity('profile_update', identityChanged ? 'User updated critical profile details (Re-verification required)' : 'User updated profile details (Status preserved)');
       
       setVerificationStatus(resolvedStatus);
@@ -1035,6 +1108,9 @@ export default function App() {
         isTenant: newStatus,
         tenantStatus: newStatus ? 'active' : 'inactive',
       });
+      if (currentUserProfile) {
+        setCurrentUserProfile({ ...currentUserProfile, isTenant: newStatus, tenantStatus: newStatus ? 'active' : 'inactive' });
+      }
       setAllUsers((prev) =>
         prev.map((u) => (u.uid === currentUser.uid ? { ...u, isTenant: newStatus, tenantStatus: newStatus ? 'active' : 'inactive' } : u))
       );
@@ -1053,6 +1129,9 @@ export default function App() {
       await updateDoc(userRef, {
         monthlyProfit: parsed,
       });
+      if (currentUserProfile) {
+        setCurrentUserProfile({ ...currentUserProfile, monthlyProfit: parsed });
+      }
       setMonthlyProfit(parsed);
       setAllUsers((prev) =>
         prev.map((u) => (u.uid === currentUser.uid ? { ...u, monthlyProfit: parsed } : u))
@@ -1348,9 +1427,18 @@ export default function App() {
             transition={{ duration: 0.15 }}
             className="h-full"
           >
-            {activeTab === 'gigs' && (
-              <GigMapComponent />
-            )}
+        {activeTab === 'gigs' && (
+          <GigMapComponent setCreatingGigAt={setCreatingGigAt} userRole={userRole} gigs={gigs} />
+        )}
+        
+        {creatingGigAt && (
+          <CreateGigModal 
+            lat={creatingGigAt.lat} 
+            lng={creatingGigAt.lng} 
+            onClose={() => setCreatingGigAt(null)} 
+            onSubmit={handleCreateGig} 
+          />
+        )}
 
             {activeTab === 'seekers' && (
               <div className="space-y-6">
@@ -1549,7 +1637,9 @@ export default function App() {
                   {profilePhoto ? (
                     <img src={profilePhoto} alt="User Face Profile" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
                   ) : (
-                    <UserIcon className="w-10 h-10 text-gray-300" />
+                    <div className="skeuomorphic-icon-container">
+                      <UserIcon className="w-10 h-10 text-gray-400" />
+                    </div>
                   )}
                   {verificationStatus === 'approved' && (
                     <div className="absolute bottom-1 right-1 bg-emerald-500 text-white rounded-full p-1 shadow-sm" title="Verified">
@@ -1589,7 +1679,9 @@ export default function App() {
                           title="Click to Zoom Document"
                         />
                       ) : (
-                        <FileText className="w-8 h-8 text-gray-400" />
+                        <div className="skeuomorphic-icon-container">
+                          <FileText className="w-8 h-8 text-gray-400" />
+                        </div>
                       )}
                       <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
                         {doc.startsWith('data:image') && (
@@ -1617,7 +1709,9 @@ export default function App() {
                   ))}
                   {!isLocked && (
                     <label className="w-20 h-20 border-2 border-dashed border-gray-300 hover:border-gray-400 rounded-xl flex flex-col items-center justify-center cursor-pointer bg-white transition-colors">
+                    <div className="skeuomorphic-icon-container">
                       <Plus className="w-5 h-5 text-gray-400 mb-1" />
+                    </div>
                       <span className="text-[10px] text-gray-500">Add Doc</span>
                       <input type="file" multiple onChange={handleIdDocsUpload} className="hidden" />
                     </label>
@@ -1632,29 +1726,33 @@ export default function App() {
                   <button
                     type="button"
                     disabled={isLocked}
-                    onClick={() => setRoleChoice('seeker')}
+                    onClick={() => setIsSeeker(!isSeeker)}
                     className={`flex flex-col items-center justify-center p-4 rounded-2xl border-2 transition-all cursor-pointer ${
-                      roleChoice === 'seeker'
+                      isSeeker
                         ? 'bg-white border-emerald-500 shadow-md scale-[1.02]'
                         : 'bg-white/50 border-gray-100 text-gray-500 hover:border-emerald-200'
                     }`}
                   >
-                    <Search className={`w-6 h-6 mb-2 ${roleChoice === 'seeker' ? 'text-emerald-600' : 'text-gray-400'}`} />
-                    <span className={`text-xs font-bold ${roleChoice === 'seeker' ? 'text-gray-900' : 'text-gray-500'}`}>Seek Gigs</span>
+                  <div className="skeuomorphic-icon-container">
+                    <Search className={`w-6 h-6 mb-2 ${isSeeker ? 'text-emerald-600' : 'text-gray-400'}`} />
+                  </div>
+                    <span className={`text-xs font-bold ${isSeeker ? 'text-gray-900' : 'text-gray-500'}`}>Seek Gigs</span>
                     <span className="text-[10px] text-gray-400 mt-0.5">Find work & earn</span>
                   </button>
                   <button
                     type="button"
                     disabled={isLocked}
-                    onClick={() => setRoleChoice('creator')}
+                    onClick={() => setIsCreator(!isCreator)}
                     className={`flex flex-col items-center justify-center p-4 rounded-2xl border-2 transition-all cursor-pointer ${
-                      roleChoice === 'creator'
+                      isCreator
                         ? 'bg-white border-emerald-500 shadow-md scale-[1.02]'
                         : 'bg-white/50 border-gray-100 text-gray-500 hover:border-emerald-200'
                     }`}
                   >
-                    <Plus className={`w-6 h-6 mb-2 ${roleChoice === 'creator' ? 'text-emerald-600' : 'text-gray-400'}`} />
-                    <span className={`text-xs font-bold ${roleChoice === 'creator' ? 'text-gray-900' : 'text-gray-500'}`}>Create Gigs</span>
+                  <div className="skeuomorphic-icon-container">
+                    <Plus className={`w-6 h-6 mb-2 ${isCreator ? 'text-emerald-600' : 'text-gray-400'}`} />
+                  </div>
+                    <span className={`text-xs font-bold ${isCreator ? 'text-gray-900' : 'text-gray-500'}`}>Create Gigs</span>
                     <span className="text-[10px] text-gray-400 mt-0.5">Post jobs & hire</span>
                   </button>
                 </div>
@@ -2210,7 +2308,9 @@ export default function App() {
               className="flex-1 flex flex-col items-center justify-center py-1 rounded-xl transition-colors cursor-pointer text-gray-400 hover:text-gray-600"
               title="Return to GiGs Map"
             >
-              <Briefcase className="w-4 h-4 mb-0.5" />
+              <div className="realistic-icon-container mb-0.5">
+                <Briefcase className="w-4 h-4 text-emerald-600" />
+              </div>
               <span className="text-[9px]">GiGs</span>
             </button>
 
@@ -2220,7 +2320,9 @@ export default function App() {
                 tenantSubTab === 'overview' ? 'text-emerald-700 font-semibold' : 'text-gray-400 hover:text-gray-600'
               }`}
             >
-              <Activity className="w-4 h-4 mb-0.5" />
+              <div className="realistic-icon-container mb-0.5">
+                <Activity className="w-4 h-4 text-blue-600" />
+              </div>
               <span className="text-[9px]">Overview</span>
             </button>
 
@@ -2230,8 +2332,10 @@ export default function App() {
                 tenantSubTab === 'tenants' ? 'text-emerald-700 font-semibold' : 'text-gray-400 hover:text-gray-600'
               }`}
             >
-              <DollarSign className="w-4 h-4 mb-0.5" />
-              <span className="text-[9px]">Earnings</span>
+                <div className="realistic-icon-container mb-0.5">
+                  <DollarSign className="w-4 h-4 text-amber-600" />
+                </div>
+                <span className="text-[9px]">Earnings</span>
             </button>
 
             <button
@@ -2240,7 +2344,9 @@ export default function App() {
                 tenantSubTab === 'users' ? 'text-emerald-700 font-semibold' : 'text-gray-400 hover:text-gray-600'
               }`}
             >
-              <Users className="w-4 h-4 mb-0.5" />
+              <div className="realistic-icon-container mb-0.5">
+                <Users className="w-4 h-4 text-indigo-600" />
+              </div>
               <span className="text-[9px]">Users</span>
             </button>
 
@@ -2250,7 +2356,9 @@ export default function App() {
                 tenantSubTab === 'agreements' ? 'text-emerald-700 font-semibold' : 'text-gray-400 hover:text-gray-600'
               }`}
             >
-              <FileText className="w-4 h-4 mb-0.5" />
+              <div className="realistic-icon-container mb-0.5">
+                <FileText className="w-4 h-4 text-rose-600" />
+              </div>
               <span className="text-[9px]">Agreements</span>
             </button>
 
@@ -2260,7 +2368,9 @@ export default function App() {
                 tenantSubTab === 'active_tenants' ? 'text-emerald-700 font-semibold' : 'text-gray-400 hover:text-gray-600'
               }`}
             >
-              <Shield className="w-4 h-4 mb-0.5" />
+              <div className="realistic-icon-container mb-0.5">
+                <Shield className="w-4 h-4 text-emerald-600" />
+              </div>
               <span className="text-[9px]">Tenants</span>
             </button>
 
@@ -2272,7 +2382,9 @@ export default function App() {
               className="flex-1 flex flex-col items-center justify-center py-1 rounded-xl transition-colors cursor-pointer text-gray-400 hover:text-gray-600"
               title="View Profile"
             >
-              <UserIcon className="w-4 h-4 mb-0.5" />
+              <div className="realistic-icon-container mb-0.5">
+                <UserIcon className="w-4 h-4 text-blue-600" />
+              </div>
               <span className="text-[9px]">Profile</span>
             </button>
           </>
@@ -2302,7 +2414,9 @@ export default function App() {
                 activeTab === 'gigs' ? 'text-gray-900 font-medium' : 'text-gray-400 hover:text-gray-600'
               }`}
             >
-              <Briefcase className="w-5 h-5 mb-0.5" />
+              <div className="foundry3d-icon-container mb-0.5">
+                <Briefcase className="w-5 h-5 text-gray-300" />
+              </div>
               <span className="text-[10px]">GiGs</span>
             </button>
 

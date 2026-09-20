@@ -1,5 +1,33 @@
 {
   "entities": {
+    "Gig": {
+      "title": "Gig",
+      "description": "Job gig posting",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "creatorId": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "price": { "type": "number" },
+        "lat": { "type": "number" },
+        "lng": { "type": "number" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["id", "creatorId", "title", "lat", "lng"]
+    },
+    "GigApplication": {
+      "title": "Gig Application",
+      "description": "User application to a gig",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "seekerId": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "enum": ["pending", "accepted", "rejected"] },
+        "appliedAt": { "type": "string" }
+      },
+      "required": ["id", "seekerId", "status", "appliedAt"]
+    },
     "User": {
       "title": "User",
       "description": "User profile and verification submission",
@@ -115,6 +143,18 @@
         "$ref": "#/entities/Admin"
       },
       "description": "Admin records"
+    },
+    "/gigs/{gigId}": {
+      "schema": {
+        "$ref": "#/entities/Gig"
+      },
+      "description": "Gig postings"
+    },
+    "/gigs/{gigId}/applications/{applicationId}": {
+      "schema": {
+        "$ref": "#/entities/GigApplication"
+      },
+      "description": "Gig applications"
     }
   }
 }

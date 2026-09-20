@@ -3,6 +3,24 @@ export interface SocialLink {
   url: string;
 }
 
+export interface Gig {
+  id: string;
+  creatorId: string;
+  title: string;
+  description: string;
+  price: number;
+  lat: number;
+  lng: number;
+  createdAt: string;
+}
+
+export interface GigApplication {
+  id: string;
+  seekerId: string;
+  status: 'pending' | 'accepted' | 'rejected';
+  appliedAt: string;
+}
+
 export interface UserActivity {
   id: string;
   type: 'login' | 'profile_update' | 'tenant_status' | 'verification_review' | 'document_upload' | 'other';
@@ -28,6 +46,7 @@ export interface UserProfile {
   socialLinks: SocialLink[];
   skills: string[];
   role: 'seeker' | 'creator' | 'admin' | 'user';
+  roles?: string[];
   verificationStatus: 'none' | 'pending' | 'approved' | 'rejected';
   monthlyProfit?: number;
   isTenant?: boolean;
