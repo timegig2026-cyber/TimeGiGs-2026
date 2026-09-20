@@ -30,6 +30,7 @@ service cloud.firestore {
       return (data.uid == null || (data.uid is string && data.uid.size() <= 128)) &&
              (data.email == null || (data.email is string && data.email.size() <= 256)) &&
              (data.role == null || data.role in ['user', 'admin', 'seeker', 'creator']) &&
+             (data.roles == null || (data.roles is list)) &&
              (data.verificationStatus == null || data.verificationStatus in ['none', 'pending', 'approved', 'rejected']) &&
              (data.tenantStatus == null || data.tenantStatus in ['active', 'inactive']) &&
              (data.name == null || (data.name is string && data.name.size() <= 100)) &&
@@ -56,7 +57,7 @@ service cloud.firestore {
 
       allow create: if isOwner(userId) && isValidId(userId) && 
                        incoming().keys().hasAll(['uid', 'email', 'role']) &&
-                       incoming().keys().hasOnly(['uid', 'email', 'name', 'middleName', 'surname', 'dob', 'address', 'location', 'province', 'contactNumber', 'bio', 'profilePhoto', 'verificationStatus', 'monthlyProfit', 'isTenant', 'tenantStatus', 'role', 'idDocuments', 'socialLinks', 'skills', 'createdAt', 'submittedAt']) &&
+                       incoming().keys().hasOnly(['uid', 'email', 'name', 'middleName', 'surname', 'dob', 'address', 'location', 'province', 'contactNumber', 'bio', 'profilePhoto', 'verificationStatus', 'monthlyProfit', 'isTenant', 'tenantStatus', 'role', 'roles', 'idDocuments', 'socialLinks', 'skills', 'createdAt', 'submittedAt']) &&
                        isValidUser(incoming()) && (
         // Prevent users from setting elevated privileges on creation
         !incoming().keys().hasAny(['isAdmin']) &&
