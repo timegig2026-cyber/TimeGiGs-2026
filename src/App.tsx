@@ -5,11 +5,14 @@
 
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, User } from 'firebase/auth';
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, User, createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
 import { getFirestore, doc, setDoc, getDoc, getDocFromServer, collection, getDocs, updateDoc } from 'firebase/firestore';
-import { User as UserIcon, Shield, FileText, CheckCircle2, XCircle, Clock, Plus, Trash2, Briefcase, Upload, Check, AlertCircle, Users, Activity, FileCheck, DollarSign, Lock, Unlock, Globe, Compass, Search } from 'lucide-react';
+import { User as UserIcon, Shield, FileText, CheckCircle2, XCircle, Clock, Plus, Trash2, Briefcase, Upload, Check, AlertCircle, Users, Activity, FileCheck, DollarSign, Lock, Unlock, Globe, Compass, Search, Building, TrendingUp, RefreshCw } from 'lucide-react';
 import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 import firebaseConfig from '../firebase-applet-config.json';
+import { SocialLink, UserProfile, TenantSubTab } from './types';
+import { TenantPortalView } from './components/TenantPortalView';
 
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
@@ -62,80 +65,77 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   throw new Error(JSON.stringify(errInfo));
 }
 
-interface SocialLink {
-  platform: string;
-  url: string;
-}
-
-interface UserProfile {
-  uid: string;
-  email: string;
-  name: string;
-  middleName?: string;
-  surname: string;
-  dob: string;
-  address: string;
-  location: string;
-  province: string;
-  contactNumber: string;
-  bio: string;
-  profilePhoto: string;
-  idDocuments: string[];
-  socialLinks: SocialLink[];
-  skills: string[];
-  verificationStatus: 'none' | 'pending' | 'approved' | 'rejected';
-  monthlyProfit?: number;
-  isTenant?: boolean;
-  tenantStatus?: 'active' | 'inactive';
-  submittedAt?: string;
-  createdAt: string;
-}
-
 function GigMapComponent() {
   const mapRef = React.useRef<HTMLDivElement>(null);
   const mapInstanceRef = React.useRef<L.Map | null>(null);
   const markerRef = React.useRef<L.Marker | null>(null);
+  const initTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const invalidateTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isMountedRef = React.useRef<boolean>(true);
+
   const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [loadingLoc, setLoadingLoc] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isSearching, setIsSearching] = useState<boolean>(false);
 
+  // Safe marker updater helper preventing detached layer or undefined _leaflet_pos access
+  const updateMarker = (map: L.Map, lat: number, lng: number, popupContent: string) => {
+    if (!isMountedRef.current || !mapInstanceRef.current) return;
+    try {
+      if (markerRef.current) {
+        if (map.hasLayer(markerRef.current)) {
+          map.removeLayer(markerRef.current);
+        }
+        markerRef.current = null;
+      }
+      const marker = L.marker([lat, lng]).addTo(map);
+      marker.bindPopup(popupContent).openPopup();
+      markerRef.current = marker;
+    } catch (e) {
+      console.warn('Leaflet marker placement guarded:', e);
+    }
+  };
+
   const fetchLocation = (map: L.Map) => {
+    if (!isMountedRef.current) return;
     setLoadingLoc(true);
+
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
-          if (!mapInstanceRef.current) return;
+          if (!isMountedRef.current || !mapInstanceRef.current) return;
           const lat = position.coords.latitude;
           const lng = position.coords.longitude;
           setCoords({ lat, lng });
           setLoadingLoc(false);
           setErrorMsg(null);
-          map.setView([lat, lng], 16, { animate: true });
-
-          if (markerRef.current) {
-            map.removeLayer(markerRef.current);
+          try {
+            map.setView([lat, lng], 16, { animate: true });
+            updateMarker(
+              map,
+              lat,
+              lng,
+              `<b>Your Exact Location</b><br />Lat: ${lat.toFixed(4)}, Lng: ${lng.toFixed(4)}`
+            );
+          } catch (e) {
+            console.warn('Leaflet setView guarded:', e);
           }
-          markerRef.current = L.marker([lat, lng]).addTo(map)
-            .bindPopup('<b>Your Exact Location</b><br />Lat: ' + lat.toFixed(4) + ', Lng: ' + lng.toFixed(4))
-            .openPopup();
         },
-        (err) => {
-          if (!mapInstanceRef.current) return;
+        () => {
+          if (!isMountedRef.current || !mapInstanceRef.current) return;
           setLoadingLoc(false);
           setErrorMsg('Location access denied or unavailable. Using default location.');
           const defaultLat = -26.2041;
           const defaultLng = 28.0473;
-          map.setView([defaultLat, defaultLng], 14);
-          if (markerRef.current) {
-            map.removeLayer(markerRef.current);
+          try {
+            map.setView([defaultLat, defaultLng], 14);
+            updateMarker(map, defaultLat, defaultLng, '<b>Default Location (Johannesburg)</b>');
+          } catch (e) {
+            console.warn('Leaflet default view guarded:', e);
           }
-          markerRef.current = L.marker([defaultLat, defaultLng]).addTo(map)
-            .bindPopup('<b>Default Location</b>')
-            .openPopup();
         },
-        { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
       );
     } else {
       setLoadingLoc(false);
@@ -144,13 +144,9 @@ function GigMapComponent() {
   };
 
   useEffect(() => {
-    if (!mapRef.current) return;
+    isMountedRef.current = true;
 
-    if (mapInstanceRef.current) {
-      mapInstanceRef.current.remove();
-      mapInstanceRef.current = null;
-    }
-
+    // Fix standard Leaflet default icon paths to prevent coordinate calculation crashes
     try {
       delete (L.Icon.Default.prototype as any)._getIconUrl;
       L.Icon.Default.mergeOptions({
@@ -158,31 +154,97 @@ function GigMapComponent() {
         iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
         shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
       });
-    } catch (e) {}
+    } catch (e) {
+      // Ignore if already patched
+    }
 
-    const defaultLat = -26.2041;
-    const defaultLng = 28.0473;
+    // Defensive macro-task delay (using setTimeout) to allow layout engine to finish rendering styles
+    initTimeoutRef.current = setTimeout(() => {
+      if (!isMountedRef.current || !mapRef.current) return;
 
-    const map = L.map(mapRef.current).setView([defaultLat, defaultLng], 14);
-    mapInstanceRef.current = map;
-
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19,
-      attribution: '&copy; <a href="https://openstreetmap.org">OpenStreetMap</a> contributors'
-    }).addTo(map);
-
-    setTimeout(() => {
+      // Idempotency check: prevent duplicate map allocations during React strict mode or HMR
       if (mapInstanceRef.current) {
-        mapInstanceRef.current.invalidateSize();
+        try {
+          mapInstanceRef.current.remove();
+        } catch (e) {
+          // ignore error during cleanup
+        }
+        mapInstanceRef.current = null;
       }
-    }, 250);
 
-    fetchLocation(map);
+      // Check if container was already stamped with _leaflet_id by a detached instance
+      if ((mapRef.current as any)._leaflet_id) {
+        delete (mapRef.current as any)._leaflet_id;
+      }
+
+      const defaultLat = -26.2041;
+      const defaultLng = 28.0473;
+
+      try {
+        const map = L.map(mapRef.current, {
+          preferCanvas: true,
+          zoomControl: false, // Disables default top-left control that is occluded by the top search bar
+          scrollWheelZoom: true,
+          doubleClickZoom: true,
+          touchZoom: true,
+          boxZoom: true,
+          keyboard: true,
+        }).setView([defaultLat, defaultLng], 14);
+
+        mapInstanceRef.current = map;
+
+        // Position Leaflet's zoom control in bottomright so it is never blocked
+        L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 19,
+          attribution: '&copy; <a href="https://openstreetmap.org">OpenStreetMap</a> contributors',
+        }).addTo(map);
+
+        // Force explicit invalidateSize invocation immediately after instantiation
+        map.invalidateSize();
+
+        // Secondary delayed invalidateSize to handle any container transitions
+        invalidateTimeoutRef.current = setTimeout(() => {
+          if (isMountedRef.current && mapInstanceRef.current) {
+            mapInstanceRef.current.invalidateSize();
+          }
+        }, 200);
+
+        fetchLocation(map);
+      } catch (err) {
+        console.error('Leaflet initialization error guarded:', err);
+      }
+    }, 100);
 
     return () => {
+      isMountedRef.current = false;
+      if (initTimeoutRef.current) {
+        clearTimeout(initTimeoutRef.current);
+        initTimeoutRef.current = null;
+      }
+      if (invalidateTimeoutRef.current) {
+        clearTimeout(invalidateTimeoutRef.current);
+        invalidateTimeoutRef.current = null;
+      }
+      if (markerRef.current) {
+        try {
+          if (mapInstanceRef.current && mapInstanceRef.current.hasLayer(markerRef.current)) {
+            mapInstanceRef.current.removeLayer(markerRef.current);
+          }
+        } catch (e) {}
+        markerRef.current = null;
+      }
       if (mapInstanceRef.current) {
-        mapInstanceRef.current.remove();
+        try {
+          mapInstanceRef.current.remove();
+        } catch (e) {
+          console.warn('Map cleanup error:', e);
+        }
         mapInstanceRef.current = null;
+      }
+      if (mapRef.current && (mapRef.current as any)._leaflet_id) {
+        delete (mapRef.current as any)._leaflet_id;
       }
     };
   }, []);
@@ -204,15 +266,15 @@ function GigMapComponent() {
         const lng = parseFloat(result.lon);
         const displayName = result.display_name;
 
-        mapInstanceRef.current.setView([lat, lng], 16, { animate: true });
-
-        if (markerRef.current) {
-          mapInstanceRef.current.removeLayer(markerRef.current);
+        if (mapInstanceRef.current) {
+          mapInstanceRef.current.setView([lat, lng], 16, { animate: true });
+          updateMarker(
+            mapInstanceRef.current,
+            lat,
+            lng,
+            `<b>Found Location:</b><br />${displayName}<br />Lat: ${lat.toFixed(4)}, Lng: ${lng.toFixed(4)}`
+          );
         }
-
-        markerRef.current = L.marker([lat, lng]).addTo(mapInstanceRef.current)
-          .bindPopup(`<b>Found Location:</b><br />${displayName}<br />Lat: ${lat.toFixed(4)}, Lng: ${lng.toFixed(4)}`)
-          .openPopup();
       } else {
         setErrorMsg('Location not found. Please try entering a valid house number, street, or province.');
       }
@@ -225,14 +287,18 @@ function GigMapComponent() {
 
   const handleShowWholeWorld = () => {
     if (mapInstanceRef.current) {
-      mapInstanceRef.current.setView([20, 0], 2, { animate: true });
+      try {
+        mapInstanceRef.current.setView([20, 0], 2, { animate: true });
+      } catch (e) {}
     }
   };
 
   const handleRecenter = () => {
     if (mapInstanceRef.current) {
       if (coords) {
-        mapInstanceRef.current.setView([coords.lat, coords.lng], 16, { animate: true });
+        try {
+          mapInstanceRef.current.setView([coords.lat, coords.lng], 16, { animate: true });
+        } catch (e) {}
       } else {
         fetchLocation(mapInstanceRef.current);
       }
@@ -240,53 +306,63 @@ function GigMapComponent() {
   };
 
   return (
-    <div className="absolute inset-x-0 top-16 bottom-16 flex flex-col w-full h-[calc(100vh-8rem)]">
-      <div className="absolute top-3 left-3 right-3 sm:left-auto sm:right-3 sm:w-[450px] z-20 flex flex-col gap-2">
-        <form onSubmit={handleSearch} className="flex items-center gap-2 bg-white/95 backdrop-blur-md px-3 py-2 rounded-2xl shadow-xl border border-gray-100">
-          <Search className="w-4 h-4 text-gray-400 shrink-0 ml-1" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search house no, street, location, province..."
-            className="w-full text-xs sm:text-sm bg-transparent border-none outline-none text-gray-900 placeholder:text-gray-400"
-          />
+    <div className="absolute inset-x-0 top-0 bottom-16 flex flex-col w-full h-[calc(100vh-4rem)]">
+      {/* Top Controls: Search Bar at the very top, and My Location / Whole World buttons underneath */}
+      <div className="absolute top-3 inset-x-0 z-20 flex flex-col items-center gap-2 px-3 pointer-events-none">
+        {/* Search Bar */}
+        <div className="w-full max-w-lg pointer-events-auto flex flex-col gap-1.5">
+          <form onSubmit={handleSearch} className="flex items-center gap-2 bg-white/95 backdrop-blur-md px-3.5 py-2 rounded-2xl shadow-xl border border-gray-100">
+            <Search className="w-4 h-4 text-gray-400 shrink-0 ml-1" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search house no, street, location, province..."
+              className="w-full text-xs sm:text-sm bg-transparent border-none outline-none text-gray-900 placeholder:text-gray-400"
+            />
+            <button
+              type="submit"
+              disabled={isSearching}
+              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-400 text-white rounded-xl text-xs font-medium transition-colors shadow-xs cursor-pointer shrink-0"
+            >
+              {isSearching ? 'Searching...' : 'Search'}
+            </button>
+          </form>
+
+          {errorMsg && (
+            <div className="bg-amber-50/95 backdrop-blur-md border border-amber-200 text-amber-800 text-[11px] px-3 py-1.5 rounded-xl shadow-md text-center">
+              {errorMsg}
+            </div>
+          )}
+        </div>
+
+        {/* My Location and Whole World under the search bar */}
+        <div className="pointer-events-auto flex items-center gap-2 bg-white/95 backdrop-blur-md px-2.5 py-1.5 rounded-2xl shadow-lg border border-gray-100">
           <button
-            type="submit"
-            disabled={isSearching}
-            className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-400 text-white rounded-xl text-xs font-medium transition-colors shadow-xs cursor-pointer shrink-0"
+            onClick={handleRecenter}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-medium transition-colors shadow-xs cursor-pointer"
+            title="Recenter on My Location"
           >
-            {isSearching ? 'Searching...' : 'Search'}
+            <Compass className="w-3.5 h-3.5" />
+            <span>My Location</span>
           </button>
-        </form>
-
-        {errorMsg && (
-          <div className="bg-amber-50/95 backdrop-blur-md border border-amber-200 text-amber-800 text-[11px] px-3 py-1.5 rounded-xl shadow-md">
-            {errorMsg}
-          </div>
-        )}
+          <button
+            onClick={handleShowWholeWorld}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-900 hover:bg-gray-800 text-white rounded-xl text-xs font-medium transition-colors shadow-xs cursor-pointer"
+            title="View Whole World"
+          >
+            <Globe className="w-3.5 h-3.5" />
+            <span>Whole World</span>
+          </button>
+        </div>
       </div>
 
-      <div className="absolute bottom-6 right-3 z-20 flex items-center gap-2 bg-white/95 backdrop-blur-md px-3 py-2 rounded-2xl shadow-lg border border-gray-100">
-        <button
-          onClick={handleRecenter}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-medium transition-colors shadow-xs cursor-pointer"
-          title="Recenter on My Location"
-        >
-          <Compass className="w-3.5 h-3.5" />
-          <span>My Location</span>
-        </button>
-        <button
-          onClick={handleShowWholeWorld}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-900 hover:bg-gray-800 text-white rounded-xl text-xs font-medium transition-colors shadow-xs cursor-pointer"
-          title="View Whole World"
-        >
-          <Globe className="w-3.5 h-3.5" />
-          <span>Whole World</span>
-        </button>
-      </div>
-
-      <div ref={mapRef} className="w-full h-full z-10" />
+      <div
+        ref={mapRef}
+        id="leaflet-gig-map"
+        style={{ width: '100%', height: '100%', minHeight: '400px', display: 'block' }}
+        className="w-full h-full z-10"
+      />
     </div>
   );
 }
@@ -294,10 +370,19 @@ function GigMapComponent() {
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'gigs' | 'profile' | 'admin'>('gigs');
+  const [activeTab, setActiveTab] = useState<'gigs' | 'profile' | 'tenant' | 'admin'>('gigs');
   const [adminSubTab, setAdminSubTab] = useState<'overview' | 'users' | 'tenants' | 'agreements' | 'active_tenants' | 'online_users'>('overview');
+  const [tenantSubTab, setTenantSubTab] = useState<TenantSubTab>('overview');
 
-  // Profile form state
+  // Auth state
+  const [authMode, setAuthMode] = useState<'signin' | 'signup'>('signin');
+  const [signupEmail, setSignupEmail] = useState('');
+  const [signupPassword, setSignupPassword] = useState('');
+  const [signinEmail, setSigninEmail] = useState('');
+  const [signinPassword, setSigninPassword] = useState('');
+  const [acceptTerms, setAcceptTerms] = useState(false);
+  const [signupCongratsModal, setSignupCongratsModal] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [middleName, setMiddleName] = useState('');
   const [surname, setSurname] = useState('');
@@ -316,16 +401,21 @@ export default function App() {
   const [verificationStatus, setVerificationStatus] = useState<'none' | 'pending' | 'approved' | 'rejected'>('none');
   const [monthlyProfit, setMonthlyProfit] = useState<number>(0);
   const [isTenant, setIsTenant] = useState<boolean>(false);
+  const [profileSubTab, setProfileSubTab] = useState<'profile' | 'tenant'>('profile');
+  const [tenantProfitInput, setTenantProfitInput] = useState<string>('0');
+  const [isSavingTenant, setIsSavingTenant] = useState<boolean>(false);
+  const [tenantSaveSuccess, setTenantSaveSuccess] = useState<boolean>(false);
+  const [tenantNotice, setTenantNotice] = useState<string | null>(null);
   const [submittedAt, setSubmittedAt] = useState<string | null>(null);
   const [successModal, setSuccessModal] = useState(false);
   const [isProfileUnlocked, setIsProfileUnlocked] = useState(false);
 
-  // Admin state
+  // Admin state - ONLY timegig2026@gmail.com with secret password has access to admin features
   const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
   const [adminLoading, setAdminLoading] = useState(false);
   const [selectedUserModal, setSelectedUserModal] = useState<UserProfile | null>(null);
 
-  const isAdmin = currentUser?.email === 'timegig2026@gmail.com' || currentUser?.email?.endsWith('@admin.com');
+  const isAdmin = currentUser?.email?.toLowerCase() === 'timegig2026@gmail.com';
 
   useEffect(() => {
     getDocFromServer(doc(db, 'test', 'connection')).catch(() => {});
@@ -355,6 +445,7 @@ export default function App() {
             setSkills(data.skills || []);
             setVerificationStatus(data.verificationStatus || 'none');
             setMonthlyProfit(data.monthlyProfit || 0);
+            setTenantProfitInput(String(data.monthlyProfit || 0));
             setIsTenant(data.isTenant || false);
             setSubmittedAt(data.submittedAt || null);
             setIsProfileUnlocked(data.verificationStatus !== 'approved');
@@ -394,7 +485,11 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (isAdmin && activeTab === 'admin' && currentUser) {
+    // Strictly hide admin feature from normal users; redirect immediately if non-admin attempts to access admin tab
+    if (!isAdmin && activeTab === 'admin') {
+      setActiveTab('gigs');
+    }
+    if (((isAdmin && activeTab === 'admin') || activeTab === 'tenant') && currentUser) {
       fetchAdminUsers();
     }
   }, [isAdmin, activeTab, currentUser]);
@@ -421,6 +516,46 @@ export default function App() {
       await signInWithPopup(auth, provider);
     } catch (error) {
       console.error('Sign-in error:', error);
+    }
+  };
+
+  const handleEmailSignup = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!acceptTerms) {
+      setAuthError('You must accept the terms and conditions to sign up.');
+      return;
+    }
+    setAuthError(null);
+    try {
+      await createUserWithEmailAndPassword(auth, signupEmail, signupPassword);
+      setSignupCongratsModal(true);
+    } catch (err: any) {
+      setAuthError(err.message || 'Failed to sign up');
+    }
+  };
+
+  const handleEmailSignin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError(null);
+    try {
+      await signInWithEmailAndPassword(auth, signinEmail, signinPassword);
+    } catch (err: any) {
+      // If admin timegig2026@gmail.com with secret password is signing in on a fresh Firebase instance, initialize their admin auth account
+      if (
+        signinEmail.trim().toLowerCase() === 'timegig2026@gmail.com' &&
+        (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential')
+      ) {
+        try {
+          await createUserWithEmailAndPassword(auth, signinEmail, signinPassword);
+          return;
+        } catch (adminErr: any) {
+          if (adminErr.code !== 'auth/email-already-in-use') {
+            setAuthError(adminErr.message || 'Failed to authenticate admin.');
+            return;
+          }
+        }
+      }
+      setAuthError(err.message || 'Failed to sign in. Please check your credentials.');
     }
   };
 
@@ -531,6 +666,52 @@ export default function App() {
     }
   };
 
+  const handleToggleTenantStatus = async () => {
+    if (!currentUser) return;
+    const newStatus = !isTenant;
+    setIsTenant(newStatus);
+    if (newStatus) {
+      setTenantNotice('Tenant feature activated! You are now a registered tenant earning monthly passive income through the app. The Tenant tab has appeared on your bottom menu bar.');
+    } else {
+      setTenantNotice(null);
+    }
+    try {
+      const userRef = doc(db, 'users', currentUser.uid);
+      await updateDoc(userRef, {
+        isTenant: newStatus,
+        tenantStatus: newStatus ? 'active' : 'inactive',
+      });
+      setAllUsers((prev) =>
+        prev.map((u) => (u.uid === currentUser.uid ? { ...u, isTenant: newStatus, tenantStatus: newStatus ? 'active' : 'inactive' } : u))
+      );
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${currentUser.uid}`);
+    }
+  };
+
+  const handleSaveTenantProfit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentUser) return;
+    setIsSavingTenant(true);
+    const parsed = parseFloat(tenantProfitInput) || 0;
+    try {
+      const userRef = doc(db, 'users', currentUser.uid);
+      await updateDoc(userRef, {
+        monthlyProfit: parsed,
+      });
+      setMonthlyProfit(parsed);
+      setAllUsers((prev) =>
+        prev.map((u) => (u.uid === currentUser.uid ? { ...u, monthlyProfit: parsed } : u))
+      );
+      setTenantSaveSuccess(true);
+      setTimeout(() => setTenantSaveSuccess(false), 3000);
+    } catch (error) {
+      handleFirestoreError(error, OperationType.UPDATE, `users/${currentUser.uid}`);
+    } finally {
+      setIsSavingTenant(false);
+    }
+  };
+
   const handleAdminReview = async (userId: string, newStatus: 'approved' | 'rejected') => {
     const userRef = doc(db, 'users', userId);
     try {
@@ -554,22 +735,191 @@ export default function App() {
   if (!currentUser) {
     return (
       <div className="min-h-screen bg-white flex flex-col items-center justify-center p-6">
-        <div className="max-w-md w-full bg-white border border-gray-100 rounded-2xl p-8 shadow-sm text-center">
-          <h1 className="text-xl font-medium text-gray-900 mb-2">Authentication Required</h1>
-          <p className="text-sm text-gray-500 mb-6">Please sign in with your Google account to use the application.</p>
+        <div className="max-w-md w-full bg-white border border-gray-100 rounded-3xl p-8 shadow-xl">
+          <div className="text-center mb-6">
+            <h1 className="text-2xl font-light text-gray-900 tracking-tight">TimeGig</h1>
+            <p className="text-xs text-gray-500 mt-1">Professional Gigs & Tenant Verification Platform</p>
+          </div>
+
+          <div className="flex bg-gray-100 p-1 rounded-2xl mb-6">
+            <button
+              onClick={() => { setAuthMode('signin'); setAuthError(null); }}
+              className={`flex-1 py-2 text-xs font-medium rounded-xl transition-all cursor-pointer ${
+                authMode === 'signin' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900'
+              }`}
+            >
+              Sign In
+            </button>
+            <button
+              onClick={() => { setAuthMode('signup'); setAuthError(null); }}
+              className={`flex-1 py-2 text-xs font-medium rounded-xl transition-all cursor-pointer ${
+                authMode === 'signup' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900'
+              }`}
+            >
+              Sign Up
+            </button>
+          </div>
+
+          {authError && (
+            <div className="mb-4 p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs">
+              {authError}
+            </div>
+          )}
+
+          {authMode === 'signin' ? (
+            <form onSubmit={handleEmailSignin} className="space-y-4">
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-medium text-gray-700">Email Address</label>
+                  {signinEmail.trim().toLowerCase() === 'timegig2026@gmail.com' && (
+                    <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200 flex items-center gap-1">
+                      <Shield className="w-2.5 h-2.5" /> Admin Account
+                    </span>
+                  )}
+                </div>
+                <input
+                  type="email"
+                  required
+                  value={signinEmail}
+                  onChange={(e) => setSigninEmail(e.target.value)}
+                  placeholder="name@example.com"
+                  className="w-full px-3 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:border-gray-400"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">
+                  {signinEmail.trim().toLowerCase() === 'timegig2026@gmail.com' ? 'Admin Secret Password' : 'Password'}
+                </label>
+                <input
+                  type="password"
+                  required
+                  value={signinPassword}
+                  onChange={(e) => setSigninPassword(e.target.value)}
+                  placeholder={signinEmail.trim().toLowerCase() === 'timegig2026@gmail.com' ? 'Enter secret password' : '••••••••'}
+                  className="w-full px-3 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:border-gray-400"
+                />
+              </div>
+
+              {signinEmail.trim().toLowerCase() === 'timegig2026@gmail.com' && (
+                <div className="p-2.5 bg-amber-50/80 border border-amber-200/80 rounded-xl text-xs text-amber-800 flex items-center gap-2">
+                  <Shield className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>Admin login: timegig2026@gmail.com with secret password only admin knows.</span>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                className="w-full py-3 px-4 bg-gray-900 hover:bg-gray-800 text-white font-medium rounded-xl transition-colors text-sm cursor-pointer shadow-sm"
+              >
+                Sign In
+              </button>
+
+              {signinEmail.trim().toLowerCase() !== 'timegig2026@gmail.com' && (
+                <div className="pt-2 text-center">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSigninEmail('timegig2026@gmail.com');
+                      setSigninPassword('');
+                    }}
+                    className="text-xs text-gray-400 hover:text-gray-700 transition-colors inline-flex items-center gap-1 cursor-pointer"
+                  >
+                    <Shield className="w-3 h-3 text-gray-400" />
+                    <span>Admin sign-in portal</span>
+                  </button>
+                </div>
+              )}
+            </form>
+          ) : (
+            <form onSubmit={handleEmailSignup} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Email Address</label>
+                <input
+                  type="email"
+                  required
+                  value={signupEmail}
+                  onChange={(e) => setSignupEmail(e.target.value)}
+                  placeholder="name@example.com"
+                  className="w-full px-3 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:border-gray-400"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Password</label>
+                <input
+                  type="password"
+                  required
+                  value={signupPassword}
+                  onChange={(e) => setSignupPassword(e.target.value)}
+                  placeholder="At least 6 characters"
+                  className="w-full px-3 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:border-gray-400"
+                />
+              </div>
+
+              <div className="flex items-start gap-2.5 pt-1">
+                <input
+                  type="checkbox"
+                  id="terms"
+                  required
+                  checked={acceptTerms}
+                  onChange={(e) => setAcceptTerms(e.target.checked)}
+                  className="mt-0.5 rounded border-gray-300 text-gray-900 focus:ring-gray-900 cursor-pointer"
+                />
+                <label htmlFor="terms" className="text-xs text-gray-600 cursor-pointer select-none">
+                  I accept the <span className="font-medium text-gray-900 underline">Terms and Conditions</span> and privacy policy governing TimeGig platform use.
+                </label>
+              </div>
+
+              <button
+                type="submit"
+                className="w-full py-3 px-4 bg-gray-900 hover:bg-gray-800 text-white font-medium rounded-xl transition-colors text-sm cursor-pointer shadow-sm"
+              >
+                Sign Up
+              </button>
+            </form>
+          )}
+
+          <div className="relative my-6">
+            <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-200" /></div>
+            <div className="relative flex justify-center text-xs uppercase"><span className="bg-white px-2 text-gray-400">Or continue with</span></div>
+          </div>
+
           <button
             onClick={handleSignIn}
-            className="w-full py-3 px-4 bg-gray-900 hover:bg-gray-800 text-white font-medium rounded-xl transition-colors flex items-center justify-center gap-3 text-sm cursor-pointer"
+            className="w-full py-2.5 px-4 bg-white hover:bg-gray-50 border border-gray-200 text-gray-700 font-medium rounded-xl transition-colors flex items-center justify-center gap-2.5 text-sm cursor-pointer shadow-xs"
           >
             <svg className="w-4 h-4" viewBox="0 0 24 24">
-              <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-              <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-              <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-              <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
             </svg>
-            Sign in with Google
+            Google
           </button>
         </div>
+
+        {/* Signup Congratulations Modal */}
+        {signupCongratsModal && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+            <div className="bg-white border border-gray-100 rounded-3xl max-w-md w-full p-8 text-center shadow-2xl">
+              <div className="w-14 h-14 bg-emerald-50 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-4">
+                <CheckCircle2 className="w-8 h-8" />
+              </div>
+              <h3 className="text-xl font-semibold text-gray-900 mb-2">Congratulations!</h3>
+              <p className="text-sm text-gray-600 mb-6">
+                Your account has been successfully created and terms accepted. Welcome to TimeGig! You will now be directed to your profile.
+              </p>
+              <button
+                onClick={() => {
+                  setSignupCongratsModal(false);
+                  setActiveTab('profile');
+                }}
+                className="w-full py-3 px-4 bg-gray-900 hover:bg-gray-800 text-white font-medium rounded-xl transition-colors text-sm cursor-pointer shadow-sm"
+              >
+                Continue to Profile
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -578,61 +928,152 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-white relative flex flex-col justify-between selection:bg-gray-100">
-      {/* Top bar with user email and sign out - shown ONLY in profile feature */}
+      {/* Top bar with Tenant feature, user email, and sign out - shown in profile */}
       {activeTab === 'profile' && (
-        <div className="absolute top-4 right-4 flex items-center gap-3 z-10">
-          <div className="flex items-center gap-2">
-            {profilePhoto ? (
-              <div className="relative w-8 h-8 rounded-full overflow-hidden border border-gray-200">
-                <img src={profilePhoto} alt="Profile" className="w-full h-full object-cover" />
-                {verificationStatus === 'approved' && (
-                  <div className="absolute -bottom-0.5 -right-0.5 bg-emerald-500 text-white rounded-full p-0.5 shadow-xs" title="Verified">
-                    <Check className="w-2.5 h-2.5 stroke-[3]" />
+        <header className="sticky top-0 z-30 bg-white/95 backdrop-blur-md border-b border-gray-100 px-4 py-2.5 shadow-2xs">
+          <div className="max-w-5xl mx-auto flex items-center justify-between gap-3">
+            {/* Top Bar Left: Sub-navigation tabs: Profile & Tenant */}
+            <div className="flex items-center bg-gray-100 p-1 rounded-2xl">
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('profile');
+                  setProfileSubTab('profile');
+                }}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-medium transition-all cursor-pointer bg-white text-gray-900 shadow-xs"
+              >
+                <UserIcon className="w-3.5 h-3.5" />
+                <span>Profile</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('tenant');
+                  setTenantSubTab('overview');
+                }}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-medium transition-all cursor-pointer text-gray-500 hover:text-gray-900"
+              >
+                <Building className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Tenant</span>
+                {isTenant && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                )}
+              </button>
+            </div>
+
+            {/* Top Bar Right: Tenant Quick Badge, User Avatar & Email, Sign Out */}
+            <div className="flex items-center gap-2 sm:gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setActiveTab('tenant');
+                  setTenantSubTab('overview');
+                }}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-medium border transition-colors cursor-pointer ${
+                  isTenant
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                    : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100'
+                }`}
+                title="Tenant Portal & Passive Income"
+              >
+                <Shield className="w-3.5 h-3.5 text-emerald-600" />
+                <span className="hidden xs:inline">{isTenant ? 'Active Tenant' : 'Tenant Feature'}</span>
+                <span className="xs:hidden">Tenant</span>
+              </button>
+
+              <div className="flex items-center gap-2">
+                {profilePhoto ? (
+                  <div className="relative w-8 h-8 rounded-full overflow-hidden border border-gray-200">
+                    <img src={profilePhoto} alt="Profile" className="w-full h-full object-cover" />
+                    {verificationStatus === 'approved' && (
+                      <div className="absolute -bottom-0.5 -right-0.5 bg-emerald-500 text-white rounded-full p-0.5 shadow-xs" title="Verified">
+                        <Check className="w-2.5 h-2.5 stroke-[3]" />
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-xs font-medium text-gray-700">
+                    {currentUser.email?.[0]?.toUpperCase() || 'U'}
                   </div>
                 )}
+                <span className="text-xs text-gray-500 font-mono hidden md:inline">{currentUser.email}</span>
               </div>
-            ) : (
-              <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-xs font-medium text-gray-700">
-                {currentUser.email?.[0]?.toUpperCase() || 'U'}
-              </div>
-            )}
-            <span className="text-xs text-gray-500 font-mono hidden sm:inline">{currentUser.email}</span>
+
+              <button
+                onClick={handleSignOut}
+                className="text-xs text-gray-500 hover:text-gray-900 px-3 py-1.5 rounded-xl border border-gray-200 hover:border-gray-300 transition-colors cursor-pointer bg-white shadow-xs"
+              >
+                Sign Out
+              </button>
+            </div>
           </div>
-          <button
-            onClick={handleSignOut}
-            className="text-xs text-gray-500 hover:text-gray-900 px-3 py-1.5 rounded-lg border border-gray-200 hover:border-gray-300 transition-colors cursor-pointer bg-white shadow-xs"
-          >
-            Sign Out
-          </button>
-        </div>
+        </header>
       )}
 
       {/* Main Content Area */}
-      <main className="flex-1 pb-24 pt-16 px-4 max-w-5xl mx-auto w-full">
+      <main className={`flex-1 pb-24 ${activeTab === 'tenant' || activeTab === 'admin' ? 'pt-2 sm:pt-4 px-3 sm:px-6 lg:px-8 w-full max-w-none' : activeTab === 'profile' ? 'pt-4 px-4 max-w-5xl mx-auto w-full' : 'pt-16 px-4 max-w-5xl mx-auto w-full'}`}>
         {activeTab === 'gigs' && (
           <GigMapComponent />
         )}
 
+        {activeTab === 'tenant' && (
+          <TenantPortalView
+            currentUser={currentUser}
+            allUsers={allUsers}
+            adminLoading={adminLoading}
+            fetchAdminUsers={fetchAdminUsers}
+            monthlyProfit={monthlyProfit}
+            isTenant={isTenant}
+            tenantProfitInput={tenantProfitInput}
+            setTenantProfitInput={setTenantProfitInput}
+            handleSaveTenantProfit={handleSaveTenantProfit}
+            isSavingTenant={isSavingTenant}
+            tenantSaveSuccess={tenantSaveSuccess}
+            handleToggleTenantStatus={handleToggleTenantStatus}
+            tenantNotice={tenantNotice}
+            setTenantNotice={setTenantNotice}
+            verificationStatus={verificationStatus}
+            idDocuments={idDocuments}
+            contactNumber={contactNumber}
+            location={location}
+            address={address}
+            province={province}
+            profilePhoto={profilePhoto}
+            tenantSubTab={tenantSubTab}
+            setTenantSubTab={setTenantSubTab}
+            onSelectUser={(u) => setSelectedUserModal(u)}
+            onAdminReview={handleAdminReview}
+            onExitToGigs={() => setActiveTab('gigs')}
+            onOpenProfile={() => {
+              setActiveTab('profile');
+              setProfileSubTab('profile');
+            }}
+            onSignOut={handleSignOut}
+          />
+        )}
+
         {activeTab === 'profile' && (
-          <div className="py-6 max-w-2xl mx-auto">
-            <div className="mb-8 flex items-center justify-between">
-              <div>
-                <h1 className="text-2xl font-light text-gray-900 tracking-tight">User Profile & Verification</h1>
-                <p className="text-sm text-gray-500 mt-1">Complete your profile details and submit ID documents for verification.</p>
-              </div>
-              {verificationStatus === 'approved' && (
-                <button
-                  type="button"
-                  onClick={() => setIsProfileUnlocked(!isProfileUnlocked)}
-                  className={`px-3 py-1.5 text-xs font-medium rounded-xl border flex items-center gap-1.5 transition-colors cursor-pointer ${
-                    isProfileUnlocked ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-gray-50 text-gray-700 border-gray-200'
-                  }`}
-                >
-                  {isProfileUnlocked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
-                  <span>{isProfileUnlocked ? 'Lock Profile' : 'Edit Profile'}</span>
-                </button>
-              )}
-            </div>
+          <div className="py-4 max-w-2xl mx-auto">
+            <div>
+              <div className="mb-8 flex items-center justify-between">
+                  <div>
+                    <h1 className="text-2xl font-light text-gray-900 tracking-tight">User Profile & Verification</h1>
+                    <p className="text-sm text-gray-500 mt-1">Complete your profile details and submit ID documents for verification.</p>
+                  </div>
+                  {verificationStatus === 'approved' && (
+                    <button
+                      type="button"
+                      onClick={() => setIsProfileUnlocked(!isProfileUnlocked)}
+                      className={`px-3 py-1.5 text-xs font-medium rounded-xl border flex items-center gap-1.5 transition-colors cursor-pointer ${
+                        isProfileUnlocked ? 'bg-amber-50 text-amber-800 border-amber-200' : 'bg-gray-50 text-gray-700 border-gray-200'
+                      }`}
+                    >
+                      {isProfileUnlocked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+                      <span>{isProfileUnlocked ? 'Lock Profile' : 'Edit Profile'}</span>
+                    </button>
+                  )}
+                </div>
 
             {verificationStatus === 'pending' && (
               <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-center gap-3 text-amber-800 text-sm">
@@ -837,7 +1278,7 @@ export default function App() {
 
               {/* Monthly Profit (for tenant tracking) */}
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Total Monthly Profit ($) *</label>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Total Monthly Profit (R) *</label>
                 <input
                   type="number"
                   required
@@ -846,6 +1287,38 @@ export default function App() {
                   onChange={(e) => setMonthlyProfit(parseFloat(e.target.value) || 0)}
                   className="w-full px-3 py-2 text-sm bg-white border border-gray-200 rounded-xl focus:outline-none focus:border-gray-400 disabled:bg-gray-100 disabled:text-gray-500"
                 />
+              </div>
+
+              {/* Tenant Feature Activation */}
+              <div className="p-4 bg-emerald-50/70 border border-emerald-200/80 rounded-2xl">
+                <div className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    id="profile-is-tenant"
+                    disabled={isLocked}
+                    checked={isTenant}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setIsTenant(checked);
+                      if (checked) {
+                        setTenantNotice('Tenant feature activated! You will become a tenant and earn a monthly passive income through the app. The Tenant tab is now active in your bottom menu bar.');
+                      } else {
+                        setTenantNotice(null);
+                      }
+                    }}
+                    className="mt-0.5 rounded border-emerald-300 text-emerald-600 focus:ring-emerald-500 cursor-pointer w-4 h-4"
+                  />
+                  <div>
+                    <label htmlFor="profile-is-tenant" className="text-xs font-semibold text-gray-900 cursor-pointer flex items-center gap-1.5">
+                      <Building className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>Activate Tenant Feature (Earn Monthly Passive Income)</span>
+                    </label>
+                    <p className="text-[11px] text-gray-600 mt-1 leading-relaxed">
+                      By activating the tenant feature, you will become a tenant and earn a monthly passive income through the app.
+                      When you activate the tenant feature, a Tenant feature will appear in your bottom menu bar.
+                    </p>
+                  </div>
+                </div>
               </div>
 
               {/* Social Media Links */}
@@ -954,9 +1427,10 @@ export default function App() {
               )}
             </form>
           </div>
-        )}
+        </div>
+      )}
 
-        {activeTab === 'admin' && (
+        {activeTab === 'admin' && isAdmin && (
           <div className="py-6 w-full max-w-none">
             <div className="flex justify-end mb-4">
               <button
@@ -966,13 +1440,6 @@ export default function App() {
                 Refresh Data
               </button>
             </div>
-
-            {!isAdmin && (
-              <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-2xl text-amber-800 text-sm flex items-center gap-3">
-                <AlertCircle className="w-5 h-5 text-amber-600 shrink-0" />
-                <span>Notice: You are signed in as {currentUser.email}. To access full admin management, sign in with the designated admin account (timegig2026@gmail.com).</span>
-              </div>
-            )}
 
             {adminLoading ? (
               <div className="text-center py-12 text-sm text-gray-400">Loading admin records...</div>
@@ -1171,13 +1638,89 @@ export default function App() {
       </main>
 
       {/* Bottom Menu Bar */}
-      <nav aria-label="Bottom Navigation" className="fixed bottom-0 left-0 right-0 h-16 border-t border-gray-100 bg-white/90 backdrop-blur-md flex items-center justify-around px-2 z-20 shadow-xs overflow-x-auto">
-        {activeTab !== 'admin' ? (
+      <nav aria-label="Bottom Navigation" className="fixed bottom-0 left-0 right-0 h-16 border-t border-gray-100 bg-white/95 backdrop-blur-md flex items-center justify-around px-2 z-20 shadow-xs overflow-x-auto">
+        {activeTab === 'tenant' ? (
           <>
             <button
-              onClick={() => setActiveTab('profile')}
-              className={`flex flex-col items-center justify-center py-1 px-6 rounded-xl transition-colors cursor-pointer relative shrink-0 ${
-                activeTab === 'profile' ? 'text-gray-900 font-medium' : 'text-gray-400 hover:text-gray-600'
+              onClick={() => setActiveTab('gigs')}
+              className="flex flex-col items-center justify-center py-1 px-2.5 rounded-xl transition-colors cursor-pointer shrink-0 text-gray-400 hover:text-gray-600"
+              title="Return to GiGs Map"
+            >
+              <Briefcase className="w-4 h-4 mb-0.5" />
+              <span className="text-[9px]">GiGs</span>
+            </button>
+
+            <button
+              onClick={() => setTenantSubTab('overview')}
+              className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-colors cursor-pointer shrink-0 ${
+                tenantSubTab === 'overview' ? 'text-emerald-700 font-semibold' : 'text-gray-400 hover:text-gray-600'
+              }`}
+            >
+              <Activity className="w-4 h-4 mb-0.5" />
+              <span className="text-[9px]">Overview</span>
+            </button>
+
+            <button
+              onClick={() => setTenantSubTab('tenants')}
+              className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-colors cursor-pointer shrink-0 ${
+                tenantSubTab === 'tenants' ? 'text-emerald-700 font-semibold' : 'text-gray-400 hover:text-gray-600'
+              }`}
+            >
+              <DollarSign className="w-4 h-4 mb-0.5" />
+              <span className="text-[9px]">Earnings</span>
+            </button>
+
+            <button
+              onClick={() => setTenantSubTab('users')}
+              className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-colors cursor-pointer shrink-0 ${
+                tenantSubTab === 'users' ? 'text-emerald-700 font-semibold' : 'text-gray-400 hover:text-gray-600'
+              }`}
+            >
+              <Users className="w-4 h-4 mb-0.5" />
+              <span className="text-[9px]">Users</span>
+            </button>
+
+            <button
+              onClick={() => setTenantSubTab('agreements')}
+              className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-colors cursor-pointer shrink-0 ${
+                tenantSubTab === 'agreements' ? 'text-emerald-700 font-semibold' : 'text-gray-400 hover:text-gray-600'
+              }`}
+            >
+              <FileText className="w-4 h-4 mb-0.5" />
+              <span className="text-[9px]">Agreements</span>
+            </button>
+
+            <button
+              onClick={() => setTenantSubTab('active_tenants')}
+              className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-colors cursor-pointer shrink-0 ${
+                tenantSubTab === 'active_tenants' ? 'text-emerald-700 font-semibold' : 'text-gray-400 hover:text-gray-600'
+              }`}
+            >
+              <Shield className="w-4 h-4 mb-0.5" />
+              <span className="text-[9px]">Tenants</span>
+            </button>
+
+            <button
+              onClick={() => {
+                setActiveTab('profile');
+                setProfileSubTab('profile');
+              }}
+              className="flex flex-col items-center justify-center py-1 px-2.5 rounded-xl transition-colors cursor-pointer shrink-0 text-gray-400 hover:text-gray-600"
+              title="View Profile"
+            >
+              <UserIcon className="w-4 h-4 mb-0.5" />
+              <span className="text-[9px]">Profile</span>
+            </button>
+          </>
+        ) : activeTab !== 'admin' ? (
+          <>
+            <button
+              onClick={() => {
+                setActiveTab('profile');
+                setProfileSubTab('profile');
+              }}
+              className={`flex flex-col items-center justify-center py-1 px-4 rounded-xl transition-colors cursor-pointer relative shrink-0 ${
+                activeTab === 'profile' && profileSubTab === 'profile' ? 'text-gray-900 font-medium' : 'text-gray-400 hover:text-gray-600'
               }`}
             >
               <div className="relative">
@@ -1191,7 +1734,7 @@ export default function App() {
 
             <button
               onClick={() => setActiveTab('gigs')}
-              className={`flex flex-col items-center justify-center py-1 px-6 rounded-xl transition-colors cursor-pointer shrink-0 ${
+              className={`flex flex-col items-center justify-center py-1 px-4 rounded-xl transition-colors cursor-pointer shrink-0 ${
                 activeTab === 'gigs' ? 'text-gray-900 font-medium' : 'text-gray-400 hover:text-gray-600'
               }`}
             >
@@ -1199,16 +1742,40 @@ export default function App() {
               <span className="text-[10px]">GiGs</span>
             </button>
 
-            <button
-              onClick={() => {
-                setActiveTab('admin');
-                setAdminSubTab('overview');
-              }}
-              className="flex flex-col items-center justify-center py-1 px-6 rounded-xl transition-colors cursor-pointer shrink-0 text-gray-400 hover:text-gray-600"
-            >
-              <Shield className="w-5 h-5 mb-0.5" />
-              <span className="text-[10px]">Admin</span>
-            </button>
+            {/* When user activates tenant feature, let a Tenant feature appear at the bottom menu bar */}
+            {isTenant && (
+              <button
+                onClick={() => {
+                  setActiveTab('tenant');
+                  setProfileSubTab('tenant');
+                }}
+                className={`flex flex-col items-center justify-center py-1 px-4 rounded-xl transition-colors cursor-pointer shrink-0 relative ${
+                  profileSubTab === 'tenant'
+                    ? 'text-emerald-700 font-medium'
+                    : 'text-gray-400 hover:text-gray-600'
+                }`}
+              >
+                <div className="relative">
+                  <Building className="w-5 h-5 mb-0.5 text-emerald-600" />
+                  <span className="absolute -top-1 -right-1 w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+                </div>
+                <span className="text-[10px]">Tenant</span>
+              </button>
+            )}
+
+            {/* Admin feature ONLY visible if currentUser is admin (timegig2026@gmail.com) */}
+            {isAdmin && (
+              <button
+                onClick={() => {
+                  setActiveTab('admin');
+                  setAdminSubTab('overview');
+                }}
+                className="flex flex-col items-center justify-center py-1 px-4 rounded-xl transition-colors cursor-pointer shrink-0 text-gray-400 hover:text-gray-600"
+              >
+                <Shield className="w-5 h-5 mb-0.5" />
+                <span className="text-[10px]">Admin</span>
+              </button>
+            )}
           </>
         ) : (
           <>

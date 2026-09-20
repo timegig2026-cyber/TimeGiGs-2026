@@ -28,13 +28,21 @@ service cloud.firestore {
       );
     }
 
+    function isTenantUser() {
+      return isSignedIn() && (
+        isAdmin() ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isTenant == true)
+      );
+    }
+
     match /users/{userId} {
-      allow get: if isSignedIn() && isValidId(userId) && (userId == request.auth.uid || isAdmin());
-      allow list: if isSignedIn() && isAdmin();
+      allow get: if isSignedIn() && isValidId(userId);
+      allow list: if isSignedIn();
       allow create: if isSignedIn() && isValidId(userId) && userId == request.auth.uid;
       allow update: if isSignedIn() && isValidId(userId) && (
         (userId == request.auth.uid && incoming().uid == existing().uid) ||
-        isAdmin()
+        isTenantUser()
       );
       allow delete: if isSignedIn() && isValidId(userId) && (userId == request.auth.uid || isAdmin());
     }
