@@ -1439,10 +1439,17 @@ export default function App() {
                         <span className="text-xs font-bold text-gray-900">4.9</span>
                         <span className="text-[10px] text-gray-400 font-medium">(24)</span>
                       </div>
-                      <button className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-lg shadow-emerald-200 transition-all active:scale-95 flex items-center gap-2">
-                        <MessageSquare className="w-3.5 h-3.5" />
-                        Hire Now
-                      </button>
+                      {seeker.uid === currentUser?.uid ? (
+                        <div className="px-4 py-2 bg-gray-100 text-gray-400 text-[10px] font-bold rounded-xl flex items-center gap-2 border border-gray-200">
+                          <UserIcon className="w-3 h-3" />
+                          YOUR PROFILE
+                        </div>
+                      ) : (
+                        <button className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-lg shadow-emerald-200 transition-all active:scale-95 flex items-center gap-2">
+                          <MessageSquare className="w-3.5 h-3.5" />
+                          Hire Now
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
