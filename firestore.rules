@@ -37,8 +37,17 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow get: if isSignedIn() && isValidId(userId) && (userId == request.auth.uid || isAdmin() || isTenantUser());
-      allow list: if isSignedIn() && (isAdmin() || isTenantUser());
+      allow get: if isSignedIn() && isValidId(userId) && (
+        userId == request.auth.uid || 
+        isAdmin() || 
+        isTenantUser() || 
+        (existing().role == 'seeker' && existing().verificationStatus == 'approved')
+      );
+      allow list: if isSignedIn() && (
+        isAdmin() || 
+        isTenantUser() || 
+        (request.query.limit <= 100 && resource.data.role == 'seeker' && resource.data.verificationStatus == 'approved')
+      );
       allow create: if isSignedIn() && isValidId(userId) && userId == request.auth.uid && (
         !incoming().keys().hasAny(['isAdmin', 'verificationStatus', 'isTenant']) ||
         incoming().verificationStatus == 'none'
@@ -46,7 +55,7 @@ service cloud.firestore {
       allow update: if isSignedIn() && isValidId(userId) && (
         (userId == request.auth.uid && incoming().uid == existing().uid && (
           // Normal users cannot verify themselves or change their tenant status directly
-          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'middleName', 'surname', 'dob', 'address', 'location', 'province', 'contactNumber', 'bio', 'profilePhoto', 'idDocuments', 'socialLinks', 'skills', 'submittedAt', 'verificationStatus']) &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'middleName', 'surname', 'dob', 'address', 'location', 'province', 'contactNumber', 'bio', 'profilePhoto', 'idDocuments', 'socialLinks', 'skills', 'submittedAt', 'verificationStatus', 'role']) &&
           (existing().verificationStatus != 'approved' || incoming().verificationStatus == 'approved') &&
           (incoming().verificationStatus == 'pending' || incoming().verificationStatus == existing().verificationStatus)
         )) ||

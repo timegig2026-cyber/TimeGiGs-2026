@@ -27,6 +27,7 @@ export interface UserProfile {
   idDocuments: string[];
   socialLinks: SocialLink[];
   skills: string[];
+  role: 'seeker' | 'creator' | 'admin' | 'user';
   verificationStatus: 'none' | 'pending' | 'approved' | 'rejected';
   monthlyProfit?: number;
   isTenant?: boolean;

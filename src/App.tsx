@@ -6,8 +6,8 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, User, createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
-import { getFirestore, doc, setDoc, getDoc, getDocFromServer, collection, getDocs, updateDoc, addDoc, query, orderBy, limit } from 'firebase/firestore';
-import { User as UserIcon, Shield, FileText, CheckCircle2, XCircle, Clock, Plus, Minus, ZoomIn, ZoomOut, Maximize2, RotateCcw, RotateCw, MapPin, X, Trash2, Briefcase, Upload, Check, AlertCircle, Users, Activity, FileCheck, DollarSign, Lock, Unlock, Globe, Compass, Search, Building, TrendingUp, RefreshCw, History } from 'lucide-react';
+import { getFirestore, doc, setDoc, getDoc, getDocFromServer, collection, getDocs, updateDoc, addDoc, query, orderBy, limit, where } from 'firebase/firestore';
+import { User as UserIcon, Shield, FileText, CheckCircle2, XCircle, Clock, Plus, Minus, ZoomIn, ZoomOut, Maximize2, RotateCcw, RotateCw, MapPin, X, Trash2, Briefcase, Upload, Check, AlertCircle, Users, Activity, FileCheck, DollarSign, Lock, Unlock, Globe, Compass, Search, Building, TrendingUp, RefreshCw, History, MessageSquare, Star, Heart } from 'lucide-react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import firebaseConfig from '../firebase-applet-config.json';
@@ -486,7 +486,7 @@ function GigMapComponent() {
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'gigs' | 'profile' | 'tenant' | 'admin'>('gigs');
+  const [activeTab, setActiveTab] = useState<'gigs' | 'profile' | 'tenant' | 'admin' | 'seekers'>('gigs');
   const [adminSubTab, setAdminSubTab] = useState<'overview' | 'users' | 'tenants' | 'agreements' | 'active_tenants' | 'online_users'>('overview');
   const [tenantSubTab, setTenantSubTab] = useState<TenantSubTab>('overview');
 
@@ -525,9 +525,12 @@ export default function App() {
   const [submittedAt, setSubmittedAt] = useState<string | null>(null);
   const [successModal, setSuccessModal] = useState(false);
   const [isProfileUnlocked, setIsProfileUnlocked] = useState(false);
+  const [roleChoice, setRoleChoice] = useState<'seeker' | 'creator'>('seeker');
   const [activities, setActivities] = useState<UserActivity[]>([]);
   const [loadingActivities, setLoadingActivities] = useState(false);
   const [userRole, setUserRole] = useState<'admin' | 'user'>('user');
+  const [seekers, setSeekers] = useState<UserProfile[]>([]);
+  const [loadingSeekers, setLoadingSeekers] = useState(false);
 
   const resetUserState = () => {
     setName('');
@@ -551,6 +554,7 @@ export default function App() {
     setTenantProfitInput('0');
     setSubmittedAt(null);
     setIsProfileUnlocked(true);
+    setRoleChoice('seeker');
     setActivities([]);
     setAllUsers([]);
     setUserRole('user');
@@ -626,8 +630,9 @@ export default function App() {
         try {
           const docSnap = await getDoc(userRef);
           if (docSnap.exists()) {
-            const data = docSnap.data() as UserProfile & { role?: 'admin' | 'user' };
-            setUserRole(data.role || 'user');
+            const data = docSnap.data() as UserProfile;
+            setUserRole(data.role === 'admin' ? 'admin' : 'user');
+            setRoleChoice(data.role === 'creator' ? 'creator' : 'seeker');
             setName(data.name || '');
             setMiddleName(data.middleName || '');
             setSurname(data.surname || '');
@@ -693,6 +698,9 @@ export default function App() {
     if (isAdmin && (activeTab === 'admin' || activeTab === 'tenant') && currentUser) {
       fetchAdminUsers();
     }
+    if (activeTab === 'seekers') {
+      fetchSeekers();
+    }
   }, [isAdmin, activeTab, currentUser]);
 
   const fetchAdminUsers = async () => {
@@ -708,6 +716,28 @@ export default function App() {
       handleFirestoreError(error, OperationType.LIST, 'users');
     } finally {
       setAdminLoading(false);
+    }
+  };
+
+  const fetchSeekers = async () => {
+    setLoadingSeekers(true);
+    try {
+      const seekersRef = collection(db, 'users');
+      const q = query(
+        seekersRef,
+        where('role', '==', 'seeker'),
+        where('verificationStatus', '==', 'approved')
+      );
+      const querySnapshot = await getDocs(q);
+      const list: UserProfile[] = [];
+      querySnapshot.forEach((doc) => {
+        list.push(doc.data() as UserProfile);
+      });
+      setSeekers(list);
+    } catch (error) {
+      console.error('Error fetching seekers:', error);
+    } finally {
+      setLoadingSeekers(false);
     }
   };
 
@@ -824,7 +854,7 @@ export default function App() {
     const userRef = doc(db, 'users', currentUser.uid);
     const submissionTime = new Date().toISOString();
 
-    const profileData = {
+    const profileData: any = {
       uid: currentUser.uid,
       email: emailAddress || currentUser.email || '',
       name,
@@ -840,6 +870,7 @@ export default function App() {
       idDocuments,
       socialLinks,
       skills,
+      role: userRole === 'admin' ? 'admin' : roleChoice,
       verificationStatus: 'pending' as const,
       monthlyProfit: monthlyProfit || 0,
       isTenant: isTenant || false,
@@ -1184,6 +1215,105 @@ export default function App() {
           <GigMapComponent />
         )}
 
+        {activeTab === 'seekers' && (
+          <div className="space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-emerald-50 p-6 rounded-3xl border border-emerald-100">
+              <div>
+                <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                  <Users className="w-7 h-7 text-emerald-600" />
+                  Available Seekers
+                </h1>
+                <p className="text-sm text-gray-600 mt-1">Browse and hire verified professionals for your gigs.</p>
+              </div>
+              <div className="flex items-center gap-2 bg-white/60 p-1.5 rounded-2xl border border-emerald-200/50">
+                <span className="text-xs font-semibold text-emerald-700 px-3 py-1.5 bg-white rounded-xl shadow-xs">
+                  {seekers.length} Verified Seekers
+                </span>
+              </div>
+            </div>
+
+            {loadingSeekers ? (
+              <div className="flex flex-col items-center justify-center py-20 space-y-4">
+                <div className="w-12 h-12 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+                <p className="text-sm text-gray-500 font-medium">Fetching verified seekers...</p>
+              </div>
+            ) : seekers.length === 0 ? (
+              <div className="text-center py-24 bg-gray-50 border border-dashed border-gray-200 rounded-[2.5rem]">
+                <div className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-sm">
+                  <Users className="w-8 h-8 text-gray-300" />
+                </div>
+                <h3 className="text-lg font-semibold text-gray-900">No Seekers Available</h3>
+                <p className="text-sm text-gray-600 mt-2 max-w-xs mx-auto">
+                  We currently don't have any approved seekers matching your criteria. Check back soon!
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {seekers.map((seeker) => (
+                  <div key={seeker.uid} className="group bg-white border border-gray-100 rounded-[2rem] shadow-xs hover:shadow-xl hover:border-emerald-100 transition-all duration-300 overflow-hidden flex flex-col">
+                    <div className="p-6 flex-1">
+                      <div className="flex items-start justify-between mb-4">
+                        <div className="relative">
+                          <div className="w-16 h-16 rounded-2xl bg-gray-50 border border-gray-100 overflow-hidden flex items-center justify-center">
+                            {seeker.profilePhoto ? (
+                              <img src={seeker.profilePhoto} alt={seeker.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
+                            ) : (
+                              <UserIcon className="w-8 h-8 text-gray-300" />
+                            )}
+                          </div>
+                          <div className="absolute -bottom-1 -right-1 bg-emerald-500 text-white rounded-lg p-1 shadow-md border-2 border-white">
+                            <Check className="w-3 h-3 stroke-[3]" />
+                          </div>
+                        </div>
+                        <div className="flex gap-1">
+                          <button className="p-2 bg-gray-50 text-gray-400 hover:text-rose-500 hover:bg-rose-50 rounded-xl transition-colors">
+                            <Heart className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+
+                      <h3 className="text-lg font-bold text-gray-900">{seeker.name} {seeker.surname}</h3>
+                      <p className="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
+                        <MapPin className="w-3 h-3" />
+                        {seeker.location}, {seeker.province}
+                      </p>
+
+                      <div className="mt-4 flex flex-wrap gap-1.5">
+                        {seeker.skills?.slice(0, 3).map((skill, i) => (
+                          <span key={i} className="text-[10px] font-bold px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-lg border border-emerald-100 uppercase tracking-wider">
+                            {skill}
+                          </span>
+                        ))}
+                        {seeker.skills?.length > 3 && (
+                          <span className="text-[10px] font-bold px-2.5 py-1 bg-gray-50 text-gray-500 rounded-lg border border-gray-100 uppercase tracking-wider">
+                            +{seeker.skills.length - 3}
+                          </span>
+                        )}
+                      </div>
+
+                      <p className="text-xs text-gray-600 mt-4 line-clamp-2 leading-relaxed">
+                        {seeker.bio || "No bio provided."}
+                      </p>
+                    </div>
+
+                    <div className="px-6 py-4 bg-gray-50/50 border-t border-gray-50 flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-1 text-amber-500">
+                        <Star className="w-3.5 h-3.5 fill-current" />
+                        <span className="text-xs font-bold text-gray-900">4.9</span>
+                        <span className="text-[10px] text-gray-400 font-medium">(24)</span>
+                      </div>
+                      <button className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-lg shadow-emerald-200 transition-all active:scale-95 flex items-center gap-2">
+                        <MessageSquare className="w-3.5 h-3.5" />
+                        Hire Now
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {activeTab === 'tenant' && (
           <TenantPortalView
             currentUser={currentUser}
@@ -1348,6 +1478,41 @@ export default function App() {
                       <input type="file" multiple onChange={handleIdDocsUpload} className="hidden" />
                     </label>
                   )}
+                </div>
+              </div>
+
+              {/* Primary Role Choice */}
+              <div className="p-6 bg-emerald-50/50 border border-emerald-100 rounded-3xl">
+                <label className="block text-sm font-semibold text-gray-900 mb-3">What will you do on TimeGig? *</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    disabled={isLocked}
+                    onClick={() => setRoleChoice('seeker')}
+                    className={`flex flex-col items-center justify-center p-4 rounded-2xl border-2 transition-all cursor-pointer ${
+                      roleChoice === 'seeker'
+                        ? 'bg-white border-emerald-500 shadow-md scale-[1.02]'
+                        : 'bg-white/50 border-gray-100 text-gray-500 hover:border-emerald-200'
+                    }`}
+                  >
+                    <Search className={`w-6 h-6 mb-2 ${roleChoice === 'seeker' ? 'text-emerald-600' : 'text-gray-400'}`} />
+                    <span className={`text-xs font-bold ${roleChoice === 'seeker' ? 'text-gray-900' : 'text-gray-500'}`}>Seek Gigs</span>
+                    <span className="text-[10px] text-gray-400 mt-0.5">Find work & earn</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isLocked}
+                    onClick={() => setRoleChoice('creator')}
+                    className={`flex flex-col items-center justify-center p-4 rounded-2xl border-2 transition-all cursor-pointer ${
+                      roleChoice === 'creator'
+                        ? 'bg-white border-emerald-500 shadow-md scale-[1.02]'
+                        : 'bg-white/50 border-gray-100 text-gray-500 hover:border-emerald-200'
+                    }`}
+                  >
+                    <Plus className={`w-6 h-6 mb-2 ${roleChoice === 'creator' ? 'text-emerald-600' : 'text-gray-400'}`} />
+                    <span className={`text-xs font-bold ${roleChoice === 'creator' ? 'text-gray-900' : 'text-gray-500'}`}>Create Gigs</span>
+                    <span className="text-[10px] text-gray-400 mt-0.5">Post jobs & hire</span>
+                  </button>
                 </div>
               </div>
 
@@ -1891,7 +2056,7 @@ export default function App() {
       </main>
 
       {/* Bottom Menu Bar */}
-      <nav aria-label="Bottom Navigation" className="fixed bottom-0 left-0 right-0 h-16 border-t border-gray-100 bg-white/95 backdrop-blur-md flex items-center justify-around px-2 z-20 shadow-xs overflow-x-auto">
+      <nav aria-label="Bottom Navigation" className="fixed bottom-0 left-0 right-0 h-16 border-t border-gray-100 bg-white/95 backdrop-blur-md flex items-center justify-start sm:justify-around px-2 z-20 shadow-xs overflow-x-auto no-scrollbar scroll-smooth">
         {activeTab === 'tenant' ? (
           <>
             <button
@@ -1993,6 +2158,16 @@ export default function App() {
             >
               <Briefcase className="w-5 h-5 mb-0.5" />
               <span className="text-[10px]">GiGs</span>
+            </button>
+
+            <button
+              onClick={() => setActiveTab('seekers')}
+              className={`flex flex-col items-center justify-center py-1 px-4 rounded-xl transition-colors cursor-pointer shrink-0 ${
+                activeTab === 'seekers' ? 'text-gray-900 font-medium' : 'text-gray-400 hover:text-gray-600'
+              }`}
+            >
+              <Users className="w-5 h-5 mb-0.5" />
+              <span className="text-[10px]">Seekers</span>
             </button>
 
             {/* When user activates tenant feature, let a Tenant feature appear at the bottom menu bar */}
