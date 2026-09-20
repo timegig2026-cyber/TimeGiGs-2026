@@ -6,12 +6,12 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, User, createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
-import { getFirestore, doc, setDoc, getDoc, getDocFromServer, collection, getDocs, updateDoc } from 'firebase/firestore';
-import { User as UserIcon, Shield, FileText, CheckCircle2, XCircle, Clock, Plus, Minus, ZoomIn, ZoomOut, Maximize2, RotateCcw, RotateCw, MapPin, X, Trash2, Briefcase, Upload, Check, AlertCircle, Users, Activity, FileCheck, DollarSign, Lock, Unlock, Globe, Compass, Search, Building, TrendingUp, RefreshCw } from 'lucide-react';
+import { getFirestore, doc, setDoc, getDoc, getDocFromServer, collection, getDocs, updateDoc, addDoc, query, orderBy, limit } from 'firebase/firestore';
+import { User as UserIcon, Shield, FileText, CheckCircle2, XCircle, Clock, Plus, Minus, ZoomIn, ZoomOut, Maximize2, RotateCcw, RotateCw, MapPin, X, Trash2, Briefcase, Upload, Check, AlertCircle, Users, Activity, FileCheck, DollarSign, Lock, Unlock, Globe, Compass, Search, Building, TrendingUp, RefreshCw, History } from 'lucide-react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import firebaseConfig from '../firebase-applet-config.json';
-import { SocialLink, UserProfile, TenantSubTab } from './types';
+import { SocialLink, UserProfile, TenantSubTab, UserActivity } from './types';
 import { TenantPortalView } from './components/TenantPortalView';
 
 const app = initializeApp(firebaseConfig);
@@ -525,8 +525,73 @@ export default function App() {
   const [submittedAt, setSubmittedAt] = useState<string | null>(null);
   const [successModal, setSuccessModal] = useState(false);
   const [isProfileUnlocked, setIsProfileUnlocked] = useState(false);
+  const [activities, setActivities] = useState<UserActivity[]>([]);
+  const [loadingActivities, setLoadingActivities] = useState(false);
+  const [userRole, setUserRole] = useState<'admin' | 'user'>('user');
 
-  // Admin state - ONLY timegig2026@gmail.com with secret password has access to admin features
+  const resetUserState = () => {
+    setName('');
+    setMiddleName('');
+    setSurname('');
+    setDob('');
+    setAddress('');
+    setLocation('');
+    setProvince('');
+    setContactNumber('');
+    setEmailAddress('');
+    setBio('');
+    setProfilePhoto('');
+    setIdDocuments([]);
+    setSocialLinks([{ platform: 'LinkedIn', url: '' }]);
+    setSkillsInput('');
+    setSkills([]);
+    setVerificationStatus('none');
+    setMonthlyProfit(0);
+    setIsTenant(false);
+    setTenantProfitInput('0');
+    setSubmittedAt(null);
+    setIsProfileUnlocked(true);
+    setActivities([]);
+    setAllUsers([]);
+    setUserRole('user');
+  };
+
+  const logActivity = async (type: UserActivity['type'], description: string, metadata?: any) => {
+    if (!currentUser) return;
+    try {
+      const activityRef = collection(db, 'users', currentUser.uid, 'activities');
+      await addDoc(activityRef, {
+        type,
+        description,
+        timestamp: new Date().toISOString(),
+        metadata: metadata || {},
+      });
+      fetchActivities(); // Refresh activities list
+    } catch (error) {
+      console.error('Error logging activity:', error);
+    }
+  };
+
+  const fetchActivities = async () => {
+    if (!currentUser) return;
+    setLoadingActivities(true);
+    try {
+      const activitiesRef = collection(db, 'users', currentUser.uid, 'activities');
+      const q = query(activitiesRef, orderBy('timestamp', 'desc'), limit(15));
+      const querySnapshot = await getDocs(q);
+      const acts: UserActivity[] = [];
+      querySnapshot.forEach((doc) => {
+        acts.push({ id: doc.id, ...doc.data() } as UserActivity);
+      });
+      setActivities(acts);
+    } catch (error) {
+      console.error('Error fetching activities:', error);
+    } finally {
+      setLoadingActivities(false);
+    }
+  };
+
+  // Admin state - ONLY authorized admins have access to admin features
   const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
   const [adminLoading, setAdminLoading] = useState(false);
   const [selectedUserModal, setSelectedUserModal] = useState<UserProfile | null>(null);
@@ -545,20 +610,24 @@ export default function App() {
     setZoomedDoc((prev) => (prev ? { ...prev, zoom: 1, rotation: 0 } : null));
   };
 
-  const isAdmin = currentUser?.email?.toLowerCase() === 'timegig2026@gmail.com';
+  const isAdmin = userRole === 'admin' || currentUser?.email?.toLowerCase() === 'timegig2026@gmail.com';
 
   useEffect(() => {
     getDocFromServer(doc(db, 'test', 'connection')).catch(() => {});
 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      resetUserState();
       setCurrentUser(user);
       if (user) {
+        fetchActivities();
+        logActivity('login', `User logged in via ${user.providerData[0]?.providerId || 'email'}`);
         setEmailAddress(user.email || '');
         const userRef = doc(db, 'users', user.uid);
         try {
           const docSnap = await getDoc(userRef);
           if (docSnap.exists()) {
-            const data = docSnap.data() as UserProfile;
+            const data = docSnap.data() as UserProfile & { role?: 'admin' | 'user' };
+            setUserRole(data.role || 'user');
             setName(data.name || '');
             setMiddleName(data.middleName || '');
             setSurname(data.surname || '');
@@ -607,6 +676,8 @@ export default function App() {
         } catch (error) {
           handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
         }
+      } else {
+        setActivities([]);
       }
       setLoading(false);
     });
@@ -619,7 +690,7 @@ export default function App() {
     if (!isAdmin && activeTab === 'admin') {
       setActiveTab('gigs');
     }
-    if (((isAdmin && activeTab === 'admin') || activeTab === 'tenant') && currentUser) {
+    if (isAdmin && (activeTab === 'admin' || activeTab === 'tenant') && currentUser) {
       fetchAdminUsers();
     }
   }, [isAdmin, activeTab, currentUser]);
@@ -660,7 +731,11 @@ export default function App() {
       await createUserWithEmailAndPassword(auth, signupEmail, signupPassword);
       setSignupCongratsModal(true);
     } catch (err: any) {
-      setAuthError(err.message || 'Failed to sign up');
+      if (err.code === 'auth/email-already-in-use') {
+        setAuthError('This email is already registered. Please log in instead.');
+      } else {
+        setAuthError(err.message || 'Failed to sign up');
+      }
     }
   };
 
@@ -670,21 +745,6 @@ export default function App() {
     try {
       await signInWithEmailAndPassword(auth, signinEmail, signinPassword);
     } catch (err: any) {
-      // If admin timegig2026@gmail.com with secret password is signing in on a fresh Firebase instance, initialize their admin auth account
-      if (
-        signinEmail.trim().toLowerCase() === 'timegig2026@gmail.com' &&
-        (err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential')
-      ) {
-        try {
-          await createUserWithEmailAndPassword(auth, signinEmail, signinPassword);
-          return;
-        } catch (adminErr: any) {
-          if (adminErr.code !== 'auth/email-already-in-use') {
-            setAuthError(adminErr.message || 'Failed to authenticate admin.');
-            return;
-          }
-        }
-      }
       setAuthError(err.message || 'Failed to sign in. Please check your credentials.');
     }
   };
@@ -692,6 +752,8 @@ export default function App() {
   const handleSignOut = async () => {
     try {
       await signOut(auth);
+      resetUserState();
+      setActiveTab('gigs');
     } catch (error) {
       console.error('Sign-out error:', error);
     }
@@ -787,6 +849,7 @@ export default function App() {
 
     try {
       await setDoc(userRef, profileData, { merge: true });
+      logActivity('profile_update', 'User submitted profile for verification');
       setVerificationStatus('pending');
       setSubmittedAt(submissionTime);
       setIsProfileUnlocked(false);
@@ -802,8 +865,10 @@ export default function App() {
     setIsTenant(newStatus);
     if (newStatus) {
       setTenantNotice('Tenant feature activated! You are now a registered tenant earning monthly passive income through the app. The Tenant tab has appeared on your bottom menu bar.');
+      logActivity('tenant_status', 'User activated Tenant mode');
     } else {
       setTenantNotice(null);
+      logActivity('tenant_status', 'User deactivated Tenant mode');
     }
     try {
       const userRef = doc(db, 'users', currentUser.uid);
@@ -901,11 +966,6 @@ export default function App() {
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="block text-xs font-medium text-gray-700">Email Address</label>
-                  {signinEmail.trim().toLowerCase() === 'timegig2026@gmail.com' && (
-                    <span className="text-[10px] font-semibold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200 flex items-center gap-1">
-                      <Shield className="w-2.5 h-2.5" /> Admin Account
-                    </span>
-                  )}
                 </div>
                 <input
                   type="email"
@@ -918,24 +978,17 @@ export default function App() {
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">
-                  {signinEmail.trim().toLowerCase() === 'timegig2026@gmail.com' ? 'Admin Secret Password' : 'Password'}
+                  Password
                 </label>
                 <input
                   type="password"
                   required
                   value={signinPassword}
                   onChange={(e) => setSigninPassword(e.target.value)}
-                  placeholder={signinEmail.trim().toLowerCase() === 'timegig2026@gmail.com' ? 'Enter secret password' : '••••••••'}
+                  placeholder="••••••••"
                   className="w-full px-3 py-2.5 text-sm bg-gray-50 border border-gray-200 rounded-xl focus:outline-none focus:border-gray-400"
                 />
               </div>
-
-              {signinEmail.trim().toLowerCase() === 'timegig2026@gmail.com' && (
-                <div className="p-2.5 bg-amber-50/80 border border-amber-200/80 rounded-xl text-xs text-amber-800 flex items-center gap-2">
-                  <Shield className="w-4 h-4 text-amber-600 shrink-0" />
-                  <span>Admin login: timegig2026@gmail.com with secret password only admin knows.</span>
-                </div>
-              )}
 
               <button
                 type="submit"
@@ -943,22 +996,6 @@ export default function App() {
               >
                 Sign In
               </button>
-
-              {signinEmail.trim().toLowerCase() !== 'timegig2026@gmail.com' && (
-                <div className="pt-2 text-center">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSigninEmail('timegig2026@gmail.com');
-                      setSigninPassword('');
-                    }}
-                    className="text-xs text-gray-400 hover:text-gray-700 transition-colors inline-flex items-center gap-1 cursor-pointer"
-                  >
-                    <Shield className="w-3 h-3 text-gray-400" />
-                    <span>Admin sign-in portal</span>
-                  </button>
-                </div>
-              )}
             </form>
           ) : (
             <form onSubmit={handleEmailSignup} className="space-y-4">
@@ -1150,6 +1187,7 @@ export default function App() {
         {activeTab === 'tenant' && (
           <TenantPortalView
             currentUser={currentUser}
+            isAdmin={isAdmin}
             allUsers={allUsers}
             adminLoading={adminLoading}
             fetchAdminUsers={fetchAdminUsers}
@@ -1575,6 +1613,72 @@ export default function App() {
                 </button>
               )}
             </form>
+
+            {/* Recent Activities Section */}
+            <div className="mt-12 pt-10 border-t border-gray-100">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-lg font-medium text-gray-900 flex items-center gap-2">
+                    <History className="w-5 h-5 text-emerald-600" />
+                    Recent Activities
+                  </h2>
+                  <p className="text-xs text-gray-500 mt-1">Audit log of your recent actions on the platform.</p>
+                </div>
+                <button
+                  onClick={fetchActivities}
+                  disabled={loadingActivities}
+                  className="p-2 text-gray-400 hover:text-emerald-600 transition-colors disabled:opacity-30 cursor-pointer"
+                  title="Refresh activity log"
+                >
+                  <RefreshCw className={`w-4 h-4 ${loadingActivities ? 'animate-spin' : ''}`} />
+                </button>
+              </div>
+
+              {loadingActivities && activities.length === 0 ? (
+                <div className="text-center py-10 space-y-3">
+                  <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin mx-auto" />
+                  <p className="text-xs text-gray-400">Loading activities...</p>
+                </div>
+              ) : activities.length === 0 ? (
+                <div className="text-center py-12 bg-gray-50/50 border border-dashed border-gray-200 rounded-2xl">
+                  <Activity className="w-8 h-8 text-gray-300 mx-auto mb-2" />
+                  <p className="text-xs text-gray-500 font-medium">No recent activity recorded yet.</p>
+                  <p className="text-[10px] text-gray-400 mt-1">Actions like logins and profile updates will appear here.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {activities.map((act) => (
+                    <div key={act.id} className="group p-4 bg-white border border-gray-100 rounded-2xl shadow-xs hover:border-emerald-100 hover:shadow-md transition-all flex items-start gap-4">
+                      <div className={`p-2 rounded-xl shrink-0 ${
+                        act.type === 'login' ? 'bg-blue-50 text-blue-600' :
+                        act.type === 'profile_update' ? 'bg-emerald-50 text-emerald-600' :
+                        act.type === 'tenant_status' ? 'bg-amber-50 text-amber-600' :
+                        'bg-gray-50 text-gray-600'
+                      }`}>
+                        {act.type === 'login' ? <Lock className="w-4 h-4" /> :
+                         act.type === 'profile_update' ? <UserIcon className="w-4 h-4" /> :
+                         act.type === 'tenant_status' ? <Building className="w-4 h-4" /> :
+                         <Activity className="w-4 h-4" />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center justify-between gap-2">
+                          <h3 className="text-xs font-semibold text-gray-900 capitalize">{act.type.replace('_', ' ')}</h3>
+                          <span className="text-[10px] text-gray-400 font-mono">
+                            {new Date(act.timestamp).toLocaleString(undefined, {
+                              month: 'short',
+                              day: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })}
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-600 mt-0.5 line-clamp-2">{act.description}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -1912,7 +2016,7 @@ export default function App() {
               </button>
             )}
 
-            {/* Admin feature ONLY visible if currentUser is admin (timegig2026@gmail.com) */}
+            {/* Admin feature ONLY visible if currentUser is authorized */}
             {isAdmin && (
               <button
                 onClick={() => {

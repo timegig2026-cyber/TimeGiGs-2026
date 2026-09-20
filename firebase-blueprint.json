@@ -56,6 +56,19 @@
         "email": { "type": "string", "maxLength": 256 }
       },
       "required": ["uid", "email"]
+    },
+    "UserActivity": {
+      "title": "User Activity",
+      "description": "Log of user actions",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string" },
+        "description": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "metadata": { "type": "object" }
+      },
+      "required": ["id", "type", "description", "timestamp"]
     }
   },
   "firestore": {
@@ -64,6 +77,12 @@
         "$ref": "#/entities/User"
       },
       "description": "User profiles"
+    },
+    "/users/{userId}/activities/{activityId}": {
+      "schema": {
+        "$ref": "#/entities/UserActivity"
+      },
+      "description": "User activity logs"
     },
     "/users/{userId}/agreements/{agreementId}": {
       "schema": {

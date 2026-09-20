@@ -37,14 +37,28 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow get: if isSignedIn() && isValidId(userId);
-      allow list: if isSignedIn();
-      allow create: if isSignedIn() && isValidId(userId) && userId == request.auth.uid;
+      allow get: if isSignedIn() && isValidId(userId) && (userId == request.auth.uid || isAdmin() || isTenantUser());
+      allow list: if isSignedIn() && (isAdmin() || isTenantUser());
+      allow create: if isSignedIn() && isValidId(userId) && userId == request.auth.uid && (
+        !incoming().keys().hasAny(['isAdmin', 'verificationStatus', 'isTenant']) ||
+        incoming().verificationStatus == 'none'
+      );
       allow update: if isSignedIn() && isValidId(userId) && (
-        (userId == request.auth.uid && incoming().uid == existing().uid) ||
-        isTenantUser()
+        (userId == request.auth.uid && incoming().uid == existing().uid && (
+          // Normal users cannot verify themselves or change their tenant status directly
+          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'middleName', 'surname', 'dob', 'address', 'location', 'province', 'contactNumber', 'bio', 'profilePhoto', 'idDocuments', 'socialLinks', 'skills', 'submittedAt', 'verificationStatus']) &&
+          (existing().verificationStatus != 'approved' || incoming().verificationStatus == 'approved') &&
+          (incoming().verificationStatus == 'pending' || incoming().verificationStatus == existing().verificationStatus)
+        )) ||
+        isAdmin()
       );
       allow delete: if isSignedIn() && isValidId(userId) && (userId == request.auth.uid || isAdmin());
+    }
+
+    match /users/{userId}/activities/{activityId} {
+      allow read: if isSignedIn() && isValidId(userId) && (userId == request.auth.uid || isTenantUser());
+      allow create: if isSignedIn() && isValidId(userId) && userId == request.auth.uid;
+      allow update, delete: if false;
     }
 
     match /users/{userId}/agreements/{agreementId} {

@@ -21,6 +21,7 @@ import { UserProfile, TenantSubTab } from '../types';
 
 interface TenantPortalViewProps {
   currentUser: User | null;
+  isAdmin: boolean;
   allUsers: UserProfile[];
   adminLoading: boolean;
   fetchAdminUsers: () => Promise<void>;
@@ -52,6 +53,7 @@ interface TenantPortalViewProps {
 
 export function TenantPortalView({
   currentUser,
+  isAdmin,
   allUsers,
   adminLoading,
   fetchAdminUsers,
@@ -83,6 +85,21 @@ export function TenantPortalView({
   const totalPlatformProfit = allUsers.reduce((acc, u) => acc + (u.monthlyProfit || 0), 0);
   const activeTenantsList = allUsers.filter((u) => u.isTenant || u.verificationStatus === 'approved');
   const pendingUsersList = allUsers.filter((u) => u.verificationStatus === 'pending');
+
+  const availableTabs = [
+    { id: 'overview', label: 'Overview', icon: Activity },
+    { id: 'my_tenant', label: 'My Passive Income & Settings', icon: TrendingUp },
+  ];
+
+  if (isAdmin) {
+    availableTabs.splice(1, 0,
+      { id: 'users', label: `Users (${allUsers.length})`, icon: Users },
+      { id: 'tenants', label: `Tenants (${activeTenantsList.length})`, icon: Shield },
+      { id: 'agreements', label: 'Agreements', icon: FileText },
+      { id: 'active_tenants', label: 'Active Tenants', icon: DollarSign },
+      { id: 'online_users', label: 'Online (1)', icon: Users },
+    );
+  }
 
   return (
     <div className="w-full max-w-none py-2 sm:py-4 space-y-6">
@@ -175,15 +192,7 @@ export function TenantPortalView({
 
       {/* Sub-Navigation Tabs Bar (Desktop and Mobile) */}
       <div className="flex items-center gap-1.5 p-1.5 bg-gray-100/80 rounded-2xl overflow-x-auto">
-        {[
-          { id: 'overview', label: 'Overview', icon: Activity },
-          { id: 'users', label: `Users (${allUsers.length})`, icon: Users },
-          { id: 'tenants', label: `Tenants (${activeTenantsList.length})`, icon: Shield },
-          { id: 'agreements', label: 'Agreements', icon: FileText },
-          { id: 'active_tenants', label: 'Active Tenants', icon: DollarSign },
-          { id: 'online_users', label: 'Online (1)', icon: Users },
-          { id: 'my_tenant', label: 'My Passive Income & Settings', icon: TrendingUp },
-        ].map((tab) => {
+        {availableTabs.map((tab) => {
           const Icon = tab.icon;
           const isActive = tenantSubTab === tab.id;
           return (

@@ -3,6 +3,14 @@ export interface SocialLink {
   url: string;
 }
 
+export interface UserActivity {
+  id: string;
+  type: 'login' | 'profile_update' | 'tenant_status' | 'verification_review' | 'document_upload' | 'other';
+  description: string;
+  timestamp: string;
+  metadata?: any;
+}
+
 export interface UserProfile {
   uid: string;
   email: string;
