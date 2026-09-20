@@ -2056,12 +2056,12 @@ export default function App() {
       </main>
 
       {/* Bottom Menu Bar */}
-      <nav aria-label="Bottom Navigation" className="fixed bottom-0 left-0 right-0 h-16 border-t border-gray-100 bg-white/95 backdrop-blur-md flex items-center justify-start sm:justify-around px-2 z-20 shadow-xs overflow-x-auto no-scrollbar scroll-smooth">
+      <nav aria-label="Bottom Navigation" className="fixed bottom-0 left-0 right-0 h-16 border-t border-gray-100 bg-white/95 backdrop-blur-md flex items-center justify-between px-8 z-20 shadow-xs">
         {activeTab === 'tenant' ? (
           <>
             <button
               onClick={() => setActiveTab('gigs')}
-              className="flex flex-col items-center justify-center py-1 px-2.5 rounded-xl transition-colors cursor-pointer shrink-0 text-gray-400 hover:text-gray-600"
+              className="flex-1 flex flex-col items-center justify-center py-1 rounded-xl transition-colors cursor-pointer text-gray-400 hover:text-gray-600"
               title="Return to GiGs Map"
             >
               <Briefcase className="w-4 h-4 mb-0.5" />
@@ -2070,7 +2070,7 @@ export default function App() {
 
             <button
               onClick={() => setTenantSubTab('overview')}
-              className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-colors cursor-pointer shrink-0 ${
+              className={`flex-1 flex flex-col items-center justify-center py-1 rounded-xl transition-colors cursor-pointer ${
                 tenantSubTab === 'overview' ? 'text-emerald-700 font-semibold' : 'text-gray-400 hover:text-gray-600'
               }`}
             >
@@ -2080,7 +2080,7 @@ export default function App() {
 
             <button
               onClick={() => setTenantSubTab('tenants')}
-              className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-colors cursor-pointer shrink-0 ${
+              className={`flex-1 flex flex-col items-center justify-center py-1 rounded-xl transition-colors cursor-pointer ${
                 tenantSubTab === 'tenants' ? 'text-emerald-700 font-semibold' : 'text-gray-400 hover:text-gray-600'
               }`}
             >
@@ -2090,7 +2090,7 @@ export default function App() {
 
             <button
               onClick={() => setTenantSubTab('users')}
-              className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-colors cursor-pointer shrink-0 ${
+              className={`flex-1 flex flex-col items-center justify-center py-1 rounded-xl transition-colors cursor-pointer ${
                 tenantSubTab === 'users' ? 'text-emerald-700 font-semibold' : 'text-gray-400 hover:text-gray-600'
               }`}
             >
@@ -2100,7 +2100,7 @@ export default function App() {
 
             <button
               onClick={() => setTenantSubTab('agreements')}
-              className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-colors cursor-pointer shrink-0 ${
+              className={`flex-1 flex flex-col items-center justify-center py-1 rounded-xl transition-colors cursor-pointer ${
                 tenantSubTab === 'agreements' ? 'text-emerald-700 font-semibold' : 'text-gray-400 hover:text-gray-600'
               }`}
             >
@@ -2110,7 +2110,7 @@ export default function App() {
 
             <button
               onClick={() => setTenantSubTab('active_tenants')}
-              className={`flex flex-col items-center justify-center py-1 px-2 rounded-xl transition-colors cursor-pointer shrink-0 ${
+              className={`flex-1 flex flex-col items-center justify-center py-1 rounded-xl transition-colors cursor-pointer ${
                 tenantSubTab === 'active_tenants' ? 'text-emerald-700 font-semibold' : 'text-gray-400 hover:text-gray-600'
               }`}
             >
@@ -2123,7 +2123,7 @@ export default function App() {
                 setActiveTab('profile');
                 setProfileSubTab('profile');
               }}
-              className="flex flex-col items-center justify-center py-1 px-2.5 rounded-xl transition-colors cursor-pointer shrink-0 text-gray-400 hover:text-gray-600"
+              className="flex-1 flex flex-col items-center justify-center py-1 rounded-xl transition-colors cursor-pointer text-gray-400 hover:text-gray-600"
               title="View Profile"
             >
               <UserIcon className="w-4 h-4 mb-0.5" />
@@ -2137,7 +2137,7 @@ export default function App() {
                 setActiveTab('profile');
                 setProfileSubTab('profile');
               }}
-              className={`flex flex-col items-center justify-center py-1 px-4 rounded-xl transition-colors cursor-pointer relative shrink-0 ${
+              className={`flex-1 flex flex-col items-center justify-center py-1 rounded-xl transition-colors cursor-pointer relative ${
                 activeTab === 'profile' && profileSubTab === 'profile' ? 'text-gray-900 font-medium' : 'text-gray-400 hover:text-gray-600'
               }`}
             >
@@ -2152,7 +2152,7 @@ export default function App() {
 
             <button
               onClick={() => setActiveTab('gigs')}
-              className={`flex flex-col items-center justify-center py-1 px-4 rounded-xl transition-colors cursor-pointer shrink-0 ${
+              className={`flex-1 flex flex-col items-center justify-center py-1 rounded-xl transition-colors cursor-pointer ${
                 activeTab === 'gigs' ? 'text-gray-900 font-medium' : 'text-gray-400 hover:text-gray-600'
               }`}
             >
@@ -2162,7 +2162,7 @@ export default function App() {
 
             <button
               onClick={() => setActiveTab('seekers')}
-              className={`flex flex-col items-center justify-center py-1 px-4 rounded-xl transition-colors cursor-pointer shrink-0 ${
+              className={`flex-1 flex flex-col items-center justify-center py-1 rounded-xl transition-colors cursor-pointer ${
                 activeTab === 'seekers' ? 'text-gray-900 font-medium' : 'text-gray-400 hover:text-gray-600'
               }`}
             >
@@ -2177,7 +2177,7 @@ export default function App() {
                   setActiveTab('tenant');
                   setProfileSubTab('tenant');
                 }}
-                className={`flex flex-col items-center justify-center py-1 px-4 rounded-xl transition-colors cursor-pointer shrink-0 relative ${
+                className={`flex-1 flex flex-col items-center justify-center py-1 rounded-xl transition-colors cursor-pointer relative ${
                   profileSubTab === 'tenant'
                     ? 'text-emerald-700 font-medium'
                     : 'text-gray-400 hover:text-gray-600'
@@ -2198,7 +2198,7 @@ export default function App() {
                   setActiveTab('admin');
                   setAdminSubTab('overview');
                 }}
-                className="flex flex-col items-center justify-center py-1 px-4 rounded-xl transition-colors cursor-pointer shrink-0 text-gray-400 hover:text-gray-600"
+                className="flex-1 flex flex-col items-center justify-center py-1 rounded-xl transition-colors cursor-pointer text-gray-400 hover:text-gray-600"
               >
                 <Shield className="w-5 h-5 mb-0.5" />
                 <span className="text-[10px]">Admin</span>
@@ -2209,7 +2209,7 @@ export default function App() {
           <>
             <button
               onClick={() => setActiveTab('gigs')}
-              className="flex flex-col items-center justify-center py-1 px-3 rounded-xl transition-colors cursor-pointer shrink-0 text-gray-400 hover:text-gray-600"
+              className="flex-1 flex flex-col items-center justify-center py-1 rounded-xl transition-colors cursor-pointer text-gray-400 hover:text-gray-600"
             >
               <Briefcase className="w-4 h-4 mb-0.5" />
               <span className="text-[9px]">Exit Admin</span>
@@ -2217,7 +2217,7 @@ export default function App() {
 
             <button
               onClick={() => setAdminSubTab('overview')}
-              className={`flex flex-col items-center justify-center py-1 px-2.5 rounded-xl transition-colors cursor-pointer shrink-0 ${
+              className={`flex-1 flex flex-col items-center justify-center py-1 rounded-xl transition-colors cursor-pointer ${
                 adminSubTab === 'overview' ? 'text-gray-900 font-medium' : 'text-gray-400 hover:text-gray-600'
               }`}
             >
@@ -2227,7 +2227,7 @@ export default function App() {
 
             <button
               onClick={() => setAdminSubTab('users')}
-              className={`flex flex-col items-center justify-center py-1 px-2.5 rounded-xl transition-colors cursor-pointer shrink-0 ${
+              className={`flex-1 flex flex-col items-center justify-center py-1 rounded-xl transition-colors cursor-pointer ${
                 adminSubTab === 'users' ? 'text-gray-900 font-medium' : 'text-gray-400 hover:text-gray-600'
               }`}
             >
@@ -2237,7 +2237,7 @@ export default function App() {
 
             <button
               onClick={() => setAdminSubTab('tenants')}
-              className={`flex flex-col items-center justify-center py-1 px-2.5 rounded-xl transition-colors cursor-pointer shrink-0 ${
+              className={`flex-1 flex flex-col items-center justify-center py-1 rounded-xl transition-colors cursor-pointer ${
                 adminSubTab === 'tenants' ? 'text-gray-900 font-medium' : 'text-gray-400 hover:text-gray-600'
               }`}
             >
@@ -2247,7 +2247,7 @@ export default function App() {
 
             <button
               onClick={() => setAdminSubTab('agreements')}
-              className={`flex flex-col items-center justify-center py-1 px-2.5 rounded-xl transition-colors cursor-pointer shrink-0 ${
+              className={`flex-1 flex flex-col items-center justify-center py-1 rounded-xl transition-colors cursor-pointer ${
                 adminSubTab === 'agreements' ? 'text-gray-900 font-medium' : 'text-gray-400 hover:text-gray-600'
               }`}
             >
@@ -2257,7 +2257,7 @@ export default function App() {
 
             <button
               onClick={() => setAdminSubTab('active_tenants')}
-              className={`flex flex-col items-center justify-center py-1 px-2.5 rounded-xl transition-colors cursor-pointer shrink-0 ${
+              className={`flex-1 flex flex-col items-center justify-center py-1 rounded-xl transition-colors cursor-pointer ${
                 adminSubTab === 'active_tenants' ? 'text-gray-900 font-medium' : 'text-gray-400 hover:text-gray-600'
               }`}
             >
@@ -2267,7 +2267,7 @@ export default function App() {
 
             <button
               onClick={() => setAdminSubTab('online_users')}
-              className={`flex flex-col items-center justify-center py-1 px-2.5 rounded-xl transition-colors cursor-pointer shrink-0 ${
+              className={`flex-1 flex flex-col items-center justify-center py-1 rounded-xl transition-colors cursor-pointer ${
                 adminSubTab === 'online_users' ? 'text-gray-900 font-medium' : 'text-gray-400 hover:text-gray-600'
               }`}
             >
