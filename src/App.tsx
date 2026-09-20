@@ -676,10 +676,33 @@ export default function App() {
             getDoc(adminRef)
           ]);
 
-          const isSystemAdmin = adminSnap.exists();
+          const isSystemAdmin = adminSnap.exists() || (user.email && user.email.toLowerCase().trim() === 'timegig2026@gmail.com');
+          
+          if (isSystemAdmin && !adminSnap.exists()) {
+            try {
+              await setDoc(adminRef, { 
+                email: user.email, 
+                uid: user.uid,
+                assignedAt: new Date().toISOString(),
+                method: 'auto_whitelist'
+              });
+            } catch (e) {
+              console.warn('Auto-whitelisting admin failed (permissions?):', e);
+            }
+          }
           
           if (docSnap.exists()) {
             const data = docSnap.data() as UserProfile;
+            
+            // Auto-promote system admin in user profile if desynced
+            if (isSystemAdmin && data.role !== 'admin') {
+              try {
+                await updateDoc(userRef, { role: 'admin' });
+              } catch (e) {
+                console.warn('Auto-promotion of role failed:', e);
+              }
+            }
+            
             // Force-synchronize role from multiple sources
             setUserRole(isSystemAdmin || data.role === 'admin' ? 'admin' : 'user');
             setRoleChoice(data.role === 'creator' ? 'creator' : 'seeker');
