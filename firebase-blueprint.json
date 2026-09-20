@@ -28,10 +28,30 @@
         "monthlyProfit": { "type": "number" },
         "isTenant": { "type": "boolean" },
         "tenantStatus": { "type": "string", "enum": ["active", "inactive"] },
+        "role": { "type": "string", "enum": ["user", "admin", "seeker", "creator"] },
+        "idDocuments": {
+          "type": "array",
+          "items": { "type": "string" },
+          "maxLength": 5
+        },
+        "socialLinks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "platform": { "type": "string" },
+              "url": { "type": "string" }
+            }
+          }
+        },
+        "skills": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
         "createdAt": { "type": "string" },
         "submittedAt": { "type": "string" }
       },
-      "required": ["uid", "email"]
+      "required": ["uid", "email", "role"]
     },
     "AgreementForm": {
       "title": "Agreement Form",

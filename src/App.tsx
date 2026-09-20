@@ -7,9 +7,10 @@ import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, User, createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
 import { getFirestore, doc, setDoc, getDoc, getDocFromServer, collection, getDocs, updateDoc, addDoc, query, orderBy, limit, where } from 'firebase/firestore';
-import { User as UserIcon, Shield, FileText, CheckCircle2, XCircle, Clock, Plus, Minus, ZoomIn, ZoomOut, Maximize2, RotateCcw, RotateCw, MapPin, X, Trash2, Briefcase, Upload, Check, AlertCircle, Users, Activity, FileCheck, DollarSign, Lock, Unlock, Globe, Compass, Search, Building, TrendingUp, RefreshCw, History, MessageSquare, Star, Heart } from 'lucide-react';
+import { User as UserIcon, Shield, FileText, CheckCircle2, XCircle, Clock, Plus, Minus, ZoomIn, ZoomOut, Maximize2, RotateCcw, RotateCw, MapPin, X, Trash2, Briefcase, Upload, Check, AlertCircle, Users, Activity, FileCheck, DollarSign, Lock, Unlock, Globe, Compass, Search, Building, TrendingUp, RefreshCw, History, MessageSquare, Star, Heart, LogOut } from 'lucide-react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import { motion, AnimatePresence } from 'motion/react';
 import firebaseConfig from '../firebase-applet-config.json';
 import { SocialLink, UserProfile, TenantSubTab, UserActivity } from './types';
 import { TenantPortalView } from './components/TenantPortalView';
@@ -19,50 +20,30 @@ export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
 
 enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
-
-interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId?: string | null;
-    email?: string | null;
-    emailVerified?: boolean | null;
-    isAnonymous?: boolean | null;
-    tenantId?: string | null;
-    providerInfo?: {
-      providerId?: string | null;
-      email?: string | null;
-    }[];
-  };
+  GET = 'read_document',
+  LIST = 'list_collection',
+  WRITE = 'create_document',
+  UPDATE = 'update_document',
+  DELETE = 'delete_document'
 }
 
 function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData?.map(provider => ({
-        providerId: provider.providerId,
-        email: provider.email,
-      })) || [],
-    },
-    operationType,
-    path,
+  // Access global error state via window if necessary, or let the caller handle it.
+  // Actually, I'll just throw the error and catch it in the UI components, 
+  // but to keep it simple and fulfill the "Show details" request, 
+  // I'll dispatch a custom event or use a global hook.
+  // Since I added the state to App component, I should probably pass setGlobalError down,
+  // but for simplicity I will use a custom event.
+  
+  const message = error instanceof Error ? error.message : String(error);
+  const errInfo = {
+    message: `Failed to ${operationType.replace('_', ' ')} at ${path || 'unknown path'}`,
+    details: message,
+    code: (error as any)?.code || 'UNKNOWN_FIREBASE_ERROR'
   };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+  
+  console.error('Firestore Error Detailed:', errInfo);
+  window.dispatchEvent(new CustomEvent('app-error', { detail: errInfo }));
 }
 
 function GigMapComponent() {
@@ -82,174 +63,198 @@ function GigMapComponent() {
 
   // Safe marker updater helper preventing detached layer or undefined _leaflet_pos access
   const updateMarker = (map: L.Map, lat: number, lng: number, popupContent: string) => {
-    if (!isMountedRef.current || !mapInstanceRef.current) return;
+    if (!isMountedRef.current || !mapInstanceRef.current || !map) return;
+    
     try {
+      // Ensure the map container is still in the DOM
+      const container = map.getContainer();
+      if (!container) return;
+
       if (markerRef.current) {
-        if (map.hasLayer(markerRef.current)) {
-          map.removeLayer(markerRef.current);
+        try {
+          markerRef.current.remove();
+        } catch (e) {
+          console.warn('Error removing old marker:', e);
         }
         markerRef.current = null;
       }
-      const marker = L.marker([lat, lng]).addTo(map);
-      marker.bindPopup(popupContent).openPopup();
+
+      // Create marker but don't add to map immediately if we want to be super safe
+      // Actually adding to map is required to get _icon
+      const marker = L.marker([lat, lng]);
+      
+      // Use a safer addition pattern
+      marker.addTo(map);
       markerRef.current = marker;
+
+      // Delay popup and open operation to ensure marker DOM is ready and setView animation isn't clashing
+      setTimeout(() => {
+        if (isMountedRef.current && markerRef.current === marker && mapInstanceRef.current === map) {
+          try {
+            if (map.hasLayer(marker)) {
+              marker.bindPopup(popupContent);
+              marker.openPopup();
+            }
+          } catch (popupErr) {
+            console.warn('Popup deferred opening failed:', popupErr);
+          }
+        }
+      }, 150);
     } catch (e) {
       console.warn('Leaflet marker placement guarded:', e);
     }
   };
 
   const fetchLocation = (map: L.Map) => {
-    if (!isMountedRef.current) return;
+    if (!isMountedRef.current || !map) return;
     setLoadingLoc(true);
+
+    const useFallback = (msg: string) => {
+      // Neutral South African fallback (roughly centered in SA)
+      const saFallbackLat = -30.5595;
+      const saFallbackLng = 22.9375;
+      
+      setCoords(null);
+      setLoadingLoc(false);
+      setErrorMsg(msg);
+      
+      try {
+        if (isMountedRef.current && mapInstanceRef.current === map) {
+          map.setView([saFallbackLat, saFallbackLng], 5, { animate: true });
+        }
+      } catch (e) {
+        console.error('Error setting map fallback:', e);
+      }
+    };
 
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
-          if (!isMountedRef.current || !mapInstanceRef.current) return;
+          if (!isMountedRef.current || !mapInstanceRef.current || mapInstanceRef.current !== map) return;
+          
           const lat = position.coords.latitude;
           const lng = position.coords.longitude;
+          
           setCoords({ lat, lng });
           setLoadingLoc(false);
           setErrorMsg(null);
+          
           try {
-            map.setView([lat, lng], 16, { animate: true });
-            updateMarker(
-              map,
-              lat,
-              lng,
-              `<b>Your Exact Location</b><br />Lat: ${lat.toFixed(4)}, Lng: ${lng.toFixed(4)}`
-            );
+            // Check if map is still valid
+            if (map.getContainer()) {
+              map.setView([lat, lng], 16, { animate: true });
+              updateMarker(
+                map,
+                lat,
+                lng,
+                `<b>Your Approximate Location</b><br />Lat: ${lat.toFixed(4)}, Lng: ${lng.toFixed(4)}`
+              );
+            }
           } catch (e) {
-            console.warn('Leaflet setView guarded:', e);
+            console.error('Error updating map with location:', e);
           }
         },
-        () => {
-          if (!isMountedRef.current || !mapInstanceRef.current) return;
-          setLoadingLoc(false);
-          setErrorMsg('Location access denied or unavailable. Using default location.');
-          const defaultLat = -26.2041;
-          const defaultLng = 28.0473;
-          try {
-            map.setView([defaultLat, defaultLng], 14);
-            updateMarker(map, defaultLat, defaultLng, '<b>Default Location (Johannesburg)</b>');
-          } catch (e) {
-            console.warn('Leaflet default view guarded:', e);
-          }
+        (error) => {
+          console.warn('Geolocation error:', error);
+          const messages: Record<number, string> = {
+            1: 'Location permission denied.',
+            2: 'Location information unavailable.',
+            3: 'Location request timed out.',
+          };
+          useFallback(messages[error.code] || 'Could not retrieve location.');
         },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+        { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 }
       );
     } else {
-      setLoadingLoc(false);
-      setErrorMsg('Geolocation is not supported by your browser.');
+      useFallback('Geolocation is not supported by your browser.');
     }
   };
 
   useEffect(() => {
     isMountedRef.current = true;
 
-    // Fix standard Leaflet default icon paths to prevent coordinate calculation crashes
+    // Standard Leaflet default icon paths fix
     try {
-      delete (L.Icon.Default.prototype as any)._getIconUrl;
-      L.Icon.Default.mergeOptions({
-        iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+      const DefaultIcon = L.icon({
         iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+        iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
         shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+        iconSize: [25, 41],
+        iconAnchor: [12, 41],
+        popupAnchor: [1, -34],
+        shadowSize: [41, 41]
       });
+      L.Marker.prototype.options.icon = DefaultIcon;
     } catch (e) {
-      // Ignore if already patched
+      console.warn('Icon patch warning:', e);
     }
 
-    // Defensive macro-task delay (using setTimeout) to allow layout engine to finish rendering styles
-    initTimeoutRef.current = setTimeout(() => {
-      if (!isMountedRef.current || !mapRef.current) return;
+    if (!mapRef.current) return;
 
-      // Idempotency check: prevent duplicate map allocations during React strict mode or HMR
-      if (mapInstanceRef.current) {
-        try {
-          mapInstanceRef.current.remove();
-        } catch (e) {
-          // ignore error during cleanup
-        }
-        mapInstanceRef.current = null;
-      }
-
-      // Check if container was already stamped with _leaflet_id by a detached instance
-      if ((mapRef.current as any)._leaflet_id) {
-        delete (mapRef.current as any)._leaflet_id;
-      }
-
-      const defaultLat = -26.2041;
-      const defaultLng = 28.0473;
-
+    // Stable lifecycle: Initialize map ONLY if it doesn't exist
+    if (!mapInstanceRef.current) {
       try {
+        const saFallbackLat = -30.5595;
+        const saFallbackLng = 22.9375;
+
         const map = L.map(mapRef.current, {
           preferCanvas: true,
-          zoomControl: false, // Disables default top-left control that is occluded by the top search bar
+          zoomControl: false,
           scrollWheelZoom: true,
           doubleClickZoom: true,
           touchZoom: true,
           boxZoom: true,
           keyboard: true,
-        }).setView([defaultLat, defaultLng], 14);
-
-        mapInstanceRef.current = map;
-
-        // Synchronize current zoom state on any zoom interaction (mouse wheel, pinch, buttons)
-        map.on('zoomend', () => {
-          if (isMountedRef.current && mapInstanceRef.current) {
-            setCurrentZoom(Math.round(mapInstanceRef.current.getZoom()));
-          }
-        });
+          attributionControl: true
+        }).setView([saFallbackLat, saFallbackLng], 5);
 
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
           maxZoom: 19,
           attribution: '&copy; <a href="https://openstreetmap.org">OpenStreetMap</a> contributors',
         }).addTo(map);
 
-        // Force explicit invalidateSize invocation immediately after instantiation
-        map.invalidateSize();
+        mapInstanceRef.current = map;
 
-        // Secondary delayed invalidateSize to handle any container transitions
-        invalidateTimeoutRef.current = setTimeout(() => {
+        map.on('zoomend', () => {
+          if (isMountedRef.current && mapInstanceRef.current) {
+            setCurrentZoom(Math.round(mapInstanceRef.current.getZoom()));
+          }
+        });
+
+        // Trigger size invalidation after a short delay to account for React rendering
+        setTimeout(() => {
           if (isMountedRef.current && mapInstanceRef.current) {
             mapInstanceRef.current.invalidateSize();
           }
-        }, 200);
+        }, 100);
 
         fetchLocation(map);
       } catch (err) {
-        console.error('Leaflet initialization error guarded:', err);
+        console.error('Leaflet instantiation guarded:', err);
       }
-    }, 100);
+    }
 
     return () => {
       isMountedRef.current = false;
-      if (initTimeoutRef.current) {
-        clearTimeout(initTimeoutRef.current);
-        initTimeoutRef.current = null;
-      }
-      if (invalidateTimeoutRef.current) {
-        clearTimeout(invalidateTimeoutRef.current);
-        invalidateTimeoutRef.current = null;
-      }
-      if (markerRef.current) {
-        try {
-          if (mapInstanceRef.current && mapInstanceRef.current.hasLayer(markerRef.current)) {
-            mapInstanceRef.current.removeLayer(markerRef.current);
-          }
-        } catch (e) {}
-        markerRef.current = null;
-      }
+      
+      if (initTimeoutRef.current) clearTimeout(initTimeoutRef.current);
+      if (invalidateTimeoutRef.current) clearTimeout(invalidateTimeoutRef.current);
+
       if (mapInstanceRef.current) {
         try {
+          mapInstanceRef.current.off();
           mapInstanceRef.current.remove();
         } catch (e) {
           console.warn('Map cleanup error:', e);
         }
         mapInstanceRef.current = null;
+        markerRef.current = null;
       }
-      if (mapRef.current && (mapRef.current as any)._leaflet_id) {
-        delete (mapRef.current as any)._leaflet_id;
+      
+      if (mapRef.current) {
+        try {
+          delete (mapRef.current as any)._leaflet_id;
+        } catch (e) {}
       }
     };
   }, []);
@@ -484,6 +489,17 @@ function GigMapComponent() {
 }
 
 export default function App() {
+  const [globalError, setGlobalError] = useState<{ message: string; details?: string; code?: string } | null>(null);
+
+  useEffect(() => {
+    const handleError = (e: any) => {
+      setGlobalError(e.detail);
+      setTimeout(() => setGlobalError(null), 8000);
+    };
+    window.addEventListener('app-error', handleError);
+    return () => window.removeEventListener('app-error', handleError);
+  }, []);
+
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'gigs' | 'profile' | 'tenant' | 'admin' | 'seekers'>('gigs');
@@ -525,6 +541,7 @@ export default function App() {
   const [submittedAt, setSubmittedAt] = useState<string | null>(null);
   const [successModal, setSuccessModal] = useState(false);
   const [isProfileUnlocked, setIsProfileUnlocked] = useState(false);
+  const [showSignOutConfirm, setShowSignOutConfirm] = useState(false);
   const [roleChoice, setRoleChoice] = useState<'seeker' | 'creator'>('seeker');
   const [activities, setActivities] = useState<UserActivity[]>([]);
   const [loadingActivities, setLoadingActivities] = useState(false);
@@ -562,20 +579,24 @@ export default function App() {
 
   const logActivity = async (type: UserActivity['type'], description: string, metadata?: any) => {
     if (!currentUser) return;
+    
+    // Resilient Optimistic State Rollbacks: Generate unique tracking key
+    const activityId = Math.random().toString(36).substring(2, 15) + Date.now().toString(36);
     const newActivity: UserActivity = {
-      id: Math.random().toString(36).substr(2, 9),
+      id: activityId,
       type,
       description,
       timestamp: new Date().toISOString(),
       metadata: metadata || {},
     };
 
-    // Optimistic state update: add to local state immediately
+    // Optimistic state update
     setActivities((prev) => [newActivity, ...prev].slice(0, 15));
 
     try {
-      const activityRef = collection(db, 'users', currentUser.uid, 'activities');
-      await addDoc(activityRef, {
+      const activityRef = doc(db, 'users', currentUser.uid, 'activities', activityId);
+      await setDoc(activityRef, {
+        id: activityId,
         type,
         description,
         timestamp: newActivity.timestamp,
@@ -583,8 +604,8 @@ export default function App() {
       });
     } catch (error) {
       console.error('Error logging activity:', error);
-      // Roll back optimistic local state update instantly on failure
-      setActivities((prev) => prev.filter(a => a.id !== newActivity.id));
+      // Strictly target only the explicit matching identifier for rollback
+      setActivities((prev) => prev.filter(a => a.id !== activityId));
     }
   };
 
@@ -628,6 +649,15 @@ export default function App() {
 
   const isAdmin = userRole === 'admin';
 
+  // Financial Data-View Mismatch Fix: Bulletproof input sanitizer
+  const handleTenantProfitChange = (val: string) => {
+    // Filter out non-numeric characters in real-time, allowing one decimal point
+    const sanitized = val.replace(/[^0-9.]/g, '').replace(/(\..*)\./g, '$1');
+    setTenantProfitInput(sanitized);
+    // Sync numerical state immediately to avoid desync
+    setMonthlyProfit(parseFloat(sanitized) || 0);
+  };
+
   useEffect(() => {
     getDocFromServer(doc(db, 'test', 'connection')).catch(() => {});
 
@@ -640,7 +670,7 @@ export default function App() {
         const adminRef = doc(db, 'admins', user.uid);
         
         try {
-          // Concurrently check profile and administrative directory
+          // Solve the "Admin Paradox": Concurrently check profile and administrative directory
           const [docSnap, adminSnap] = await Promise.all([
             getDoc(userRef),
             getDoc(adminRef)
@@ -672,7 +702,6 @@ export default function App() {
             setSubmittedAt(data.submittedAt || null);
             setIsProfileUnlocked(data.verificationStatus !== 'approved');
             
-            // Critical sequence: Sort documents before state assignment to prevent stringify mismatches later
             const sortedDocs = data.idDocuments ? [...data.idDocuments].sort() : [];
             setIdDocuments(sortedDocs);
             setSocialLinks(data.socialLinks && data.socialLinks.length > 0 ? data.socialLinks : [{ platform: 'LinkedIn', url: '' }]);
@@ -706,9 +735,9 @@ export default function App() {
             setIsProfileUnlocked(true);
           }
           
-          // Secure handshake: only fetch activities AFTER roles/profile are confirmed
-          fetchActivities();
-          logActivity('login', `User logged in via ${user.providerData[0]?.providerId || 'email'}`);
+          // Sequence Handshake Stream Races: Await absolute resolution before finalizing
+          await fetchActivities();
+          await logActivity('login', `User logged in via ${user.providerData[0]?.providerId || 'email'}`);
         } catch (error) {
           handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
         }
@@ -816,6 +845,7 @@ export default function App() {
       await signOut(auth);
       resetUserState();
       setActiveTab('gigs');
+      setShowSignOutConfirm(false);
     } catch (error) {
       console.error('Sign-out error:', error);
     }
@@ -883,9 +913,10 @@ export default function App() {
     e.preventDefault();
     if (!currentUser) return;
 
-    // Halt accidental role flipping: Confirm if verified professional account attempts to modify foundational role
-    if (verificationStatus === 'approved' && roleChoice !== (userRole === 'admin' ? 'admin' : roleChoice)) {
-      const confirmChange = window.confirm('You are an approved user. Changing your primary role (Seeker/Creator) will require a full profile re-verification. Do you wish to continue?');
+    // Halt Accidental Role Flipping: Add explicit user confirmation intercept
+    const currentActualRole = userRole === 'admin' ? 'admin' : roleChoice;
+    if (verificationStatus === 'approved' && roleChoice !== currentActualRole) {
+      const confirmChange = window.confirm('You are an approved user. Changing your primary role (Seeker/Creator) will require a full profile re-verification and your current verification badge will be stripped. Do you wish to continue?');
       if (!confirmChange) return;
     }
 
@@ -893,29 +924,31 @@ export default function App() {
     const submissionTime = new Date().toISOString();
 
     try {
-      // 1. Fetch existing profile to prevent status regression and safeguard systemic roles
       const docSnap = await getDoc(userRef);
       const existingData = docSnap.exists() ? docSnap.data() as UserProfile : null;
 
-      // 2. Safeguard Role (Admin/User)
+      // Guard Privilege Preferences: Protect admin roles from accidental downgrades
       const currentRoleInDb = existingData?.role || 'user';
       const resolvedRole: UserProfile['role'] = currentRoleInDb === 'admin' ? 'admin' : roleChoice;
 
-      // 3. Prevent Status Regression via resilient array comparison
+      // Bulletproof Identity Preservation Validation: Deep content matching
       let resolvedStatus: UserProfile['verificationStatus'] = 'pending';
       let identityChanged = false;
       
       if (existingData && existingData.verificationStatus === 'approved') {
-        // Sort both arrays to ensure order shifts don't trigger false flags
         const currentSortedIds = [...idDocuments].sort();
         const existingSortedIds = existingData.idDocuments ? [...existingData.idDocuments].sort() : [];
         
+        // Deep string matching confirms whether actual contents shifted
+        const idsUnchanged = existingSortedIds.length === currentSortedIds.length && 
+                           existingSortedIds.every((val, index) => val === currentSortedIds[index]);
+
         identityChanged = 
           existingData.name !== name ||
           existingData.middleName !== middleName ||
           existingData.surname !== surname ||
           existingData.dob !== dob ||
-          JSON.stringify(existingSortedIds) !== JSON.stringify(currentSortedIds);
+          !idsUnchanged;
 
         if (!identityChanged) {
           resolvedStatus = 'approved';
@@ -924,7 +957,7 @@ export default function App() {
         identityChanged = true;
       }
 
-      // Eliminate type violations by binding to UserProfile contract
+      // Eliminate Type Violations: Strict contract binding
       const profileData: UserProfile = {
         uid: currentUser.uid,
         email: emailAddress || currentUser.email || '',
@@ -1255,7 +1288,7 @@ export default function App() {
               <div className="flex items-center gap-2">
                 {profilePhoto ? (
                   <div className="relative w-8 h-8 rounded-full overflow-hidden border border-gray-200">
-                    <img src={profilePhoto} alt="Profile" className="w-full h-full object-cover" />
+                    <img src={profilePhoto} alt="User Profile" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
                     {verificationStatus === 'approved' && (
                       <div className="absolute -bottom-0.5 -right-0.5 bg-emerald-500 text-white rounded-full p-0.5 shadow-xs" title="Verified">
                         <Check className="w-2.5 h-2.5 stroke-[3]" />
@@ -1271,7 +1304,7 @@ export default function App() {
               </div>
 
               <button
-                onClick={handleSignOut}
+                onClick={() => setShowSignOutConfirm(true)}
                 className="text-xs text-gray-500 hover:text-gray-900 px-3 py-1.5 rounded-xl border border-gray-200 hover:border-gray-300 transition-colors cursor-pointer bg-white shadow-xs"
               >
                 Sign Out
@@ -1283,12 +1316,21 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className={`flex-1 pb-24 ${activeTab === 'tenant' || activeTab === 'admin' ? 'pt-2 sm:pt-4 px-3 sm:px-6 lg:px-8 w-full max-w-none' : activeTab === 'profile' ? 'pt-4 px-4 max-w-5xl mx-auto w-full' : 'pt-16 px-4 max-w-5xl mx-auto w-full'}`}>
-        {activeTab === 'gigs' && (
-          <GigMapComponent />
-        )}
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={activeTab}
+            initial={{ opacity: 0, y: 5 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -5 }}
+            transition={{ duration: 0.15 }}
+            className="h-full"
+          >
+            {activeTab === 'gigs' && (
+              <GigMapComponent />
+            )}
 
-        {activeTab === 'seekers' && (
-          <div className="space-y-6">
+            {activeTab === 'seekers' && (
+              <div className="space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-emerald-50 p-6 rounded-3xl border border-emerald-100">
               <div>
                 <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
@@ -1328,7 +1370,7 @@ export default function App() {
                         <div className="relative">
                           <div className="w-16 h-16 rounded-2xl bg-gray-50 border border-gray-100 overflow-hidden flex items-center justify-center">
                             {seeker.profilePhoto ? (
-                              <img src={seeker.profilePhoto} alt={seeker.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
+                              <img src={seeker.profilePhoto} alt={seeker.name} referrerPolicy="no-referrer" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
                             ) : (
                               <UserIcon className="w-8 h-8 text-gray-300" />
                             )}
@@ -1396,7 +1438,7 @@ export default function App() {
             monthlyProfit={monthlyProfit}
             isTenant={isTenant}
             tenantProfitInput={tenantProfitInput}
-            setTenantProfitInput={setTenantProfitInput}
+            setTenantProfitInput={handleTenantProfitChange}
             handleSaveTenantProfit={handleSaveTenantProfit}
             isSavingTenant={isSavingTenant}
             tenantSaveSuccess={tenantSaveSuccess}
@@ -1475,7 +1517,7 @@ export default function App() {
               <div className="p-6 bg-gray-50 border border-gray-100 rounded-2xl flex flex-col sm:flex-row items-center gap-6">
                 <div className="relative w-24 h-24 rounded-full bg-white border border-gray-200 overflow-hidden flex items-center justify-center shrink-0 shadow-xs">
                   {profilePhoto ? (
-                    <img src={profilePhoto} alt="Face Profile" className="w-full h-full object-cover" />
+                    <img src={profilePhoto} alt="User Face Profile" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
                   ) : (
                     <UserIcon className="w-10 h-10 text-gray-300" />
                   )}
@@ -1985,7 +2027,7 @@ export default function App() {
                           <div className="flex items-center gap-4">
                             <div className="relative w-12 h-12 rounded-full bg-gray-100 border border-gray-200 overflow-hidden flex items-center justify-center shrink-0">
                               {u.profilePhoto ? (
-                                <img src={u.profilePhoto} alt="Face" className="w-full h-full object-cover" />
+                                <img src={u.profilePhoto} alt="User Face" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
                               ) : (
                                 <UserIcon className="w-5 h-5 text-gray-400" />
                               )}
@@ -2075,7 +2117,7 @@ export default function App() {
                             <div className="flex items-center gap-3">
                               <div className="relative w-12 h-12 rounded-full bg-white border border-gray-200 overflow-hidden flex items-center justify-center shrink-0">
                                 {tenant.profilePhoto ? (
-                                  <img src={tenant.profilePhoto} alt="Tenant Logo" className="w-full h-full object-cover" />
+                                  <img src={tenant.profilePhoto} alt="Tenant Brand Logo" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
                                 ) : (
                                   <UserIcon className="w-5 h-5 text-gray-400" />
                                 )}
@@ -2106,7 +2148,7 @@ export default function App() {
                       <div className="flex items-center gap-3">
                         <div className="relative w-10 h-10 rounded-full bg-gray-100 border border-gray-200 overflow-hidden flex items-center justify-center shrink-0">
                           {profilePhoto ? (
-                            <img src={profilePhoto} alt="User Logo" className="w-full h-full object-cover" />
+                            <img src={profilePhoto} alt="My User Logo" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
                           ) : (
                             <UserIcon className="w-5 h-5 text-gray-400" />
                           )}
@@ -2125,10 +2167,12 @@ export default function App() {
             )}
           </div>
         )}
+          </motion.div>
+        </AnimatePresence>
       </main>
 
       {/* Bottom Menu Bar */}
-      <nav aria-label="Bottom Navigation" className="fixed bottom-0 left-0 right-0 h-16 border-t border-gray-100 bg-white/95 backdrop-blur-md flex items-center justify-between px-8 z-20 shadow">
+      <nav aria-label="Bottom Navigation" className="fixed bottom-0 left-0 right-0 h-16 border-t border-gray-100 bg-white/95 backdrop-blur-md flex items-center justify-between px-8 z-50 shadow">
         {activeTab === 'tenant' ? (
           <>
             <button
@@ -2394,7 +2438,7 @@ export default function App() {
                 >
                   {selectedUserModal.profilePhoto ? (
                     <>
-                      <img src={selectedUserModal.profilePhoto} alt="Face" className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                      <img src={selectedUserModal.profilePhoto} alt="User Face Detail" referrerPolicy="no-referrer" className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
                       <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
                         <ZoomIn className="w-4 h-4 text-white drop-shadow-md" />
                       </div>
@@ -2468,7 +2512,7 @@ export default function App() {
                       >
                         {doc.startsWith('data:image') ? (
                           <>
-                            <img src={doc} alt={`ID ${idx}`} className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
+                            <img src={doc} alt={`Identity Document ${idx}`} referrerPolicy="no-referrer" className="w-full h-full object-cover group-hover:scale-105 transition-transform" />
                             <div className="absolute inset-0 bg-black/35 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center text-white transition-opacity">
                               <ZoomIn className="w-5 h-5 drop-shadow-md mb-0.5" />
                               <span className="text-[10px] font-medium">Zoom In</span>
@@ -2610,6 +2654,99 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* Global Error Notification */}
+      <AnimatePresence>
+        {globalError && (
+          <motion.div
+            initial={{ opacity: 0, y: -20, x: '-50%' }}
+            animate={{ opacity: 1, y: 0, x: '-50%' }}
+            exit={{ opacity: 0, y: -20, x: '-50%' }}
+            className="fixed top-6 left-1/2 z-[200] w-full max-w-md px-4"
+          >
+            <div className="bg-white rounded-2xl shadow-2xl border border-rose-100 overflow-hidden">
+              <div className="p-4 flex items-start gap-3 bg-rose-50/50">
+                <div className="p-2 bg-rose-100 rounded-xl">
+                  <AlertCircle className="w-5 h-5 text-rose-600" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-sm font-bold text-gray-900">System Error</h3>
+                  <p className="text-xs text-gray-600 mt-1 leading-relaxed">{globalError.message}</p>
+                  
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const el = document.getElementById('error-details');
+                      if (el) el.classList.toggle('hidden');
+                    }}
+                    className="mt-2 text-[10px] font-bold text-rose-600 hover:text-rose-700 flex items-center gap-1 uppercase tracking-wider"
+                  >
+                    Show Details <Compass className="w-3 h-3" />
+                  </button>
+                  
+                  <div id="error-details" className="hidden mt-3 p-3 bg-white/80 rounded-xl border border-rose-100/50 font-mono text-[10px] text-rose-800 break-all overflow-auto max-h-32">
+                    <p className="font-bold mb-1">Code: {globalError.code}</p>
+                    <p>{globalError.details}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setGlobalError(null)}
+                  className="p-1 text-gray-400 hover:text-gray-900 transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="h-1 bg-rose-100 w-full overflow-hidden">
+                <motion.div
+                  initial={{ width: '100%' }}
+                  animate={{ width: '0%' }}
+                  transition={{ duration: 8, ease: 'linear' }}
+                  className="h-full bg-rose-500"
+                />
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Sign Out Confirmation Modal */}
+      <AnimatePresence>
+        {showSignOutConfirm && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl border border-gray-100"
+            >
+              <div className="w-12 h-12 bg-rose-50 rounded-2xl flex items-center justify-center mb-4">
+                <LogOut className="w-6 h-6 text-rose-600" />
+              </div>
+              <h3 className="text-lg font-bold text-gray-900 mb-2">Sign Out</h3>
+              <p className="text-sm text-gray-500 mb-6 leading-relaxed">
+                Are you sure you want to sign out? You'll need to log in again to access your account and settings.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowSignOutConfirm(false)}
+                  className="flex-1 px-4 py-2.5 text-sm font-semibold text-gray-600 bg-gray-50 hover:bg-gray-100 rounded-xl transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSignOut}
+                  className="flex-1 px-4 py-2.5 text-sm font-semibold text-white bg-rose-600 hover:bg-rose-700 rounded-xl transition-colors shadow-sm cursor-pointer"
+                >
+                  Sign Out
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

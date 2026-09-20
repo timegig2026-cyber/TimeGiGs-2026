@@ -97,7 +97,7 @@ export function TenantPortalView({
       { id: 'tenants', label: `Tenants (${activeTenantsList.length})`, icon: Shield },
       { id: 'agreements', label: 'Agreements', icon: FileText },
       { id: 'active_tenants', label: 'Active Tenants', icon: DollarSign },
-      { id: 'online_users', label: 'Online (1)', icon: Users },
+      { id: 'online_users', label: 'Online Status Unavailable', icon: Users },
     );
   }
 
@@ -380,8 +380,8 @@ export function TenantPortalView({
                   </div>
                   <div className="space-y-2 text-xs text-gray-600">
                     <div className="flex items-center justify-between py-1 border-b border-gray-100">
-                      <span>Standard Tenant Agreement v2.4</span>
-                      <span className="text-emerald-600 font-medium">Bound & Active</span>
+                      <span>Agreement not available</span>
+                      <span className="text-gray-400 font-medium italic">No agreement recorded</span>
                     </div>
                     <div className="flex items-center justify-between py-1 border-b border-gray-100">
                       <span>Submitted ID Documents</span>
@@ -454,7 +454,7 @@ export function TenantPortalView({
                       <div className="flex items-center gap-3.5">
                         <div className="relative w-12 h-12 rounded-full bg-gray-100 border border-gray-200 overflow-hidden flex items-center justify-center shrink-0">
                           {u.profilePhoto ? (
-                            <img src={u.profilePhoto} alt="Face" className="w-full h-full object-cover" />
+                            <img src={u.profilePhoto} alt="User Face" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
                           ) : (
                             <UserIcon className="w-6 h-6 text-gray-400" />
                           )}
@@ -592,7 +592,7 @@ export function TenantPortalView({
                       <div className="flex items-center gap-3">
                         <div className="relative w-12 h-12 rounded-full bg-white border border-gray-200 overflow-hidden flex items-center justify-center shrink-0">
                           {tenant.profilePhoto ? (
-                            <img src={tenant.profilePhoto} alt="Tenant Logo" className="w-full h-full object-cover" />
+                            <img src={tenant.profilePhoto} alt="Tenant Brand Logo" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
                           ) : (
                             <UserIcon className="w-6 h-6 text-gray-400" />
                           )}
@@ -636,7 +636,7 @@ export function TenantPortalView({
                 <div className="flex items-center gap-3.5">
                   <div className="relative w-11 h-11 rounded-full bg-gray-100 border border-gray-200 overflow-hidden flex items-center justify-center shrink-0">
                     {profilePhoto ? (
-                      <img src={profilePhoto} alt="User Logo" className="w-full h-full object-cover" />
+                      <img src={profilePhoto} alt="My User Logo" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
                     ) : (
                       <UserIcon className="w-6 h-6 text-gray-400" />
                     )}
