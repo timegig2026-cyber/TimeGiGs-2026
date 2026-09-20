@@ -9,23 +9,13 @@ service cloud.firestore {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
-    function incoming() {
-      return request.resource.data;
-    }
-
-    function existing() {
-      return resource.data;
-    }
-
     function isSignedIn() {
       return request.auth != null;
     }
 
+    // Decoupled security logic using a system-defined admins collection
     function isAdmin() {
-      return isSignedIn() && (
-        request.auth.token.email == 'timegig2026@gmail.com' ||
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
-      );
+      return isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
     }
 
     function isTenantUser() {
@@ -41,31 +31,36 @@ service cloud.firestore {
         userId == request.auth.uid || 
         isAdmin() || 
         isTenantUser() || 
-        (existing().role == 'seeker' && existing().verificationStatus == 'approved')
+        (resource.data.role == 'seeker' && resource.data.verificationStatus == 'approved')
       );
+      
+      // Fixed list rule for seeker discovery
       allow list: if isSignedIn() && (
         isAdmin() || 
         isTenantUser() || 
-        (request.query.limit <= 100 && resource.data.role == 'seeker' && resource.data.verificationStatus == 'approved')
+        (resource.data.role == 'seeker' && resource.data.verificationStatus == 'approved')
       );
+
       allow create: if isSignedIn() && isValidId(userId) && userId == request.auth.uid && (
-        !incoming().keys().hasAny(['isAdmin', 'verificationStatus', 'isTenant']) ||
-        incoming().verificationStatus == 'none'
+        !request.resource.data.keys().hasAny(['isAdmin', 'verificationStatus', 'isTenant']) ||
+        request.resource.data.verificationStatus == 'none'
       );
+
       allow update: if isSignedIn() && isValidId(userId) && (
-        (userId == request.auth.uid && incoming().uid == existing().uid && (
+        (userId == request.auth.uid && request.resource.data.uid == resource.data.uid && (
           // Normal users cannot verify themselves or change their tenant status directly
-          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'middleName', 'surname', 'dob', 'address', 'location', 'province', 'contactNumber', 'bio', 'profilePhoto', 'idDocuments', 'socialLinks', 'skills', 'submittedAt', 'verificationStatus', 'role']) &&
-          (existing().verificationStatus != 'approved' || incoming().verificationStatus == 'approved') &&
-          (incoming().verificationStatus == 'pending' || incoming().verificationStatus == existing().verificationStatus)
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'middleName', 'surname', 'dob', 'address', 'location', 'province', 'contactNumber', 'bio', 'profilePhoto', 'idDocuments', 'socialLinks', 'skills', 'submittedAt', 'verificationStatus', 'role']) &&
+          (resource.data.verificationStatus != 'approved' || request.resource.data.verificationStatus == 'approved') &&
+          (request.resource.data.verificationStatus == 'pending' || request.resource.data.verificationStatus == resource.data.verificationStatus)
         )) ||
         isAdmin()
       );
+
       allow delete: if isSignedIn() && isValidId(userId) && (userId == request.auth.uid || isAdmin());
     }
 
     match /users/{userId}/activities/{activityId} {
-      allow read: if isSignedIn() && isValidId(userId) && (userId == request.auth.uid || isTenantUser());
+      allow read: if isSignedIn() && isValidId(userId) && (userId == request.auth.uid || isTenantUser() || isAdmin());
       allow create: if isSignedIn() && isValidId(userId) && userId == request.auth.uid;
       allow update, delete: if false;
     }

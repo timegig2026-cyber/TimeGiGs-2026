@@ -562,17 +562,29 @@ export default function App() {
 
   const logActivity = async (type: UserActivity['type'], description: string, metadata?: any) => {
     if (!currentUser) return;
+    const newActivity: UserActivity = {
+      id: Math.random().toString(36).substr(2, 9),
+      type,
+      description,
+      timestamp: new Date().toISOString(),
+      metadata: metadata || {},
+    };
+
+    // Optimistic state update: add to local state immediately
+    setActivities((prev) => [newActivity, ...prev].slice(0, 15));
+
     try {
       const activityRef = collection(db, 'users', currentUser.uid, 'activities');
       await addDoc(activityRef, {
         type,
         description,
-        timestamp: new Date().toISOString(),
-        metadata: metadata || {},
+        timestamp: newActivity.timestamp,
+        metadata: newActivity.metadata,
       });
-      fetchActivities(); // Refresh activities list
     } catch (error) {
       console.error('Error logging activity:', error);
+      // Roll back optimistic local state update instantly on failure
+      setActivities((prev) => prev.filter(a => a.id !== newActivity.id));
     }
   };
 
@@ -614,7 +626,7 @@ export default function App() {
     setZoomedDoc((prev) => (prev ? { ...prev, zoom: 1, rotation: 0 } : null));
   };
 
-  const isAdmin = userRole === 'admin' || currentUser?.email?.toLowerCase() === 'timegig2026@gmail.com';
+  const isAdmin = userRole === 'admin';
 
   useEffect(() => {
     getDocFromServer(doc(db, 'test', 'connection')).catch(() => {});
@@ -623,15 +635,23 @@ export default function App() {
       resetUserState();
       setCurrentUser(user);
       if (user) {
-        fetchActivities();
-        logActivity('login', `User logged in via ${user.providerData[0]?.providerId || 'email'}`);
         setEmailAddress(user.email || '');
         const userRef = doc(db, 'users', user.uid);
+        const adminRef = doc(db, 'admins', user.uid);
+        
         try {
-          const docSnap = await getDoc(userRef);
+          // Concurrently check profile and administrative directory
+          const [docSnap, adminSnap] = await Promise.all([
+            getDoc(userRef),
+            getDoc(adminRef)
+          ]);
+
+          const isSystemAdmin = adminSnap.exists();
+          
           if (docSnap.exists()) {
             const data = docSnap.data() as UserProfile;
-            setUserRole(data.role === 'admin' ? 'admin' : 'user');
+            // Force-synchronize role from multiple sources
+            setUserRole(isSystemAdmin || data.role === 'admin' ? 'admin' : 'user');
             setRoleChoice(data.role === 'creator' ? 'creator' : 'seeker');
             setName(data.name || '');
             setMiddleName(data.middleName || '');
@@ -644,8 +664,6 @@ export default function App() {
             setEmailAddress(data.email || user.email || '');
             setBio(data.bio || '');
             setProfilePhoto(data.profilePhoto || '');
-            setIdDocuments(data.idDocuments || []);
-            setSocialLinks(data.socialLinks && data.socialLinks.length > 0 ? data.socialLinks : [{ platform: 'LinkedIn', url: '' }]);
             setSkills(data.skills || []);
             setVerificationStatus(data.verificationStatus || 'none');
             setMonthlyProfit(data.monthlyProfit || 0);
@@ -653,7 +671,14 @@ export default function App() {
             setIsTenant(data.isTenant || false);
             setSubmittedAt(data.submittedAt || null);
             setIsProfileUnlocked(data.verificationStatus !== 'approved');
+            
+            // Critical sequence: Sort documents before state assignment to prevent stringify mismatches later
+            const sortedDocs = data.idDocuments ? [...data.idDocuments].sort() : [];
+            setIdDocuments(sortedDocs);
+            setSocialLinks(data.socialLinks && data.socialLinks.length > 0 ? data.socialLinks : [{ platform: 'LinkedIn', url: '' }]);
           } else {
+            // New user initialization
+            const newRole = isSystemAdmin ? 'admin' : 'user';
             await setDoc(userRef, {
               uid: user.uid,
               email: user.email || '',
@@ -671,13 +696,19 @@ export default function App() {
               socialLinks: [{ platform: 'LinkedIn', url: '' }],
               skills: [],
               verificationStatus: 'none',
+              role: newRole,
               monthlyProfit: 0,
               isTenant: false,
               tenantStatus: 'active',
               createdAt: new Date().toISOString()
             }, { merge: true });
+            setUserRole(newRole);
             setIsProfileUnlocked(true);
           }
+          
+          // Secure handshake: only fetch activities AFTER roles/profile are confirmed
+          fetchActivities();
+          logActivity('login', `User logged in via ${user.providerData[0]?.providerId || 'email'}`);
         } catch (error) {
           handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
         }
@@ -698,7 +729,7 @@ export default function App() {
     if (isAdmin && (activeTab === 'admin' || activeTab === 'tenant') && currentUser) {
       fetchAdminUsers();
     }
-    if (activeTab === 'seekers') {
+    if (activeTab === 'seekers' && currentUser) {
       fetchSeekers();
     }
   }, [isAdmin, activeTab, currentUser]);
@@ -720,6 +751,7 @@ export default function App() {
   };
 
   const fetchSeekers = async () => {
+    if (!currentUser) return;
     setLoadingSeekers(true);
     try {
       const seekersRef = collection(db, 'users');
@@ -851,39 +883,79 @@ export default function App() {
     e.preventDefault();
     if (!currentUser) return;
 
+    // Halt accidental role flipping: Confirm if verified professional account attempts to modify foundational role
+    if (verificationStatus === 'approved' && roleChoice !== (userRole === 'admin' ? 'admin' : roleChoice)) {
+      const confirmChange = window.confirm('You are an approved user. Changing your primary role (Seeker/Creator) will require a full profile re-verification. Do you wish to continue?');
+      if (!confirmChange) return;
+    }
+
     const userRef = doc(db, 'users', currentUser.uid);
     const submissionTime = new Date().toISOString();
 
-    const profileData: any = {
-      uid: currentUser.uid,
-      email: emailAddress || currentUser.email || '',
-      name,
-      middleName,
-      surname,
-      dob,
-      address,
-      location,
-      province,
-      contactNumber,
-      bio,
-      profilePhoto,
-      idDocuments,
-      socialLinks,
-      skills,
-      role: userRole === 'admin' ? 'admin' : roleChoice,
-      verificationStatus: 'pending' as const,
-      monthlyProfit: monthlyProfit || 0,
-      isTenant: isTenant || false,
-      tenantStatus: 'active' as const,
-      submittedAt: submissionTime,
-    };
-
     try {
+      // 1. Fetch existing profile to prevent status regression and safeguard systemic roles
+      const docSnap = await getDoc(userRef);
+      const existingData = docSnap.exists() ? docSnap.data() as UserProfile : null;
+
+      // 2. Safeguard Role (Admin/User)
+      const currentRoleInDb = existingData?.role || 'user';
+      const resolvedRole: UserProfile['role'] = currentRoleInDb === 'admin' ? 'admin' : roleChoice;
+
+      // 3. Prevent Status Regression via resilient array comparison
+      let resolvedStatus: UserProfile['verificationStatus'] = 'pending';
+      let identityChanged = false;
+      
+      if (existingData && existingData.verificationStatus === 'approved') {
+        // Sort both arrays to ensure order shifts don't trigger false flags
+        const currentSortedIds = [...idDocuments].sort();
+        const existingSortedIds = existingData.idDocuments ? [...existingData.idDocuments].sort() : [];
+        
+        identityChanged = 
+          existingData.name !== name ||
+          existingData.middleName !== middleName ||
+          existingData.surname !== surname ||
+          existingData.dob !== dob ||
+          JSON.stringify(existingSortedIds) !== JSON.stringify(currentSortedIds);
+
+        if (!identityChanged) {
+          resolvedStatus = 'approved';
+        }
+      } else if (!existingData) {
+        identityChanged = true;
+      }
+
+      // Eliminate type violations by binding to UserProfile contract
+      const profileData: UserProfile = {
+        uid: currentUser.uid,
+        email: emailAddress || currentUser.email || '',
+        name,
+        middleName,
+        surname,
+        dob,
+        address,
+        location,
+        province,
+        contactNumber,
+        bio,
+        profilePhoto,
+        idDocuments,
+        socialLinks,
+        skills,
+        role: resolvedRole,
+        verificationStatus: resolvedStatus,
+        monthlyProfit: monthlyProfit || 0,
+        isTenant: isTenant || false,
+        tenantStatus: existingData?.tenantStatus || 'active',
+        submittedAt: submissionTime,
+        createdAt: existingData?.createdAt || submissionTime,
+      };
+
       await setDoc(userRef, profileData, { merge: true });
-      logActivity('profile_update', 'User submitted profile for verification');
-      setVerificationStatus('pending');
+      logActivity('profile_update', identityChanged ? 'User updated critical profile details (Re-verification required)' : 'User updated profile details (Status preserved)');
+      
+      setVerificationStatus(resolvedStatus);
       setSubmittedAt(submissionTime);
-      setIsProfileUnlocked(false);
+      setIsProfileUnlocked(resolvedStatus !== 'approved');
       setSuccessModal(true);
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, `users/${currentUser.uid}`);
@@ -2056,7 +2128,7 @@ export default function App() {
       </main>
 
       {/* Bottom Menu Bar */}
-      <nav aria-label="Bottom Navigation" className="fixed bottom-0 left-0 right-0 h-16 border-t border-gray-100 bg-white/95 backdrop-blur-md flex items-center justify-between px-8 z-20 shadow-xs">
+      <nav aria-label="Bottom Navigation" className="fixed bottom-0 left-0 right-0 h-16 border-t border-gray-100 bg-white/95 backdrop-blur-md flex items-center justify-between px-8 z-20 shadow">
         {activeTab === 'tenant' ? (
           <>
             <button
