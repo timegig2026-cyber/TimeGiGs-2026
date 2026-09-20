@@ -7,6 +7,7 @@ import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, User, createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
 import { getFirestore, doc, setDoc, getDoc, getDocFromServer, collection, getDocs, updateDoc, addDoc, query, orderBy, limit, where } from 'firebase/firestore';
+import { getStorage, ref, uploadString, getDownloadURL } from 'firebase/storage';
 import { User as UserIcon, Shield, FileText, CheckCircle2, XCircle, Clock, Plus, Minus, ZoomIn, ZoomOut, Maximize2, RotateCcw, RotateCw, MapPin, X, Trash2, Briefcase, Upload, Check, AlertCircle, Users, Activity, FileCheck, DollarSign, Lock, Unlock, Globe, Compass, Search, Building, TrendingUp, RefreshCw, History, MessageSquare, Star, Heart, LogOut } from 'lucide-react';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -19,6 +20,7 @@ import { Gig } from './types';
 
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+export const storage = getStorage(app);
 export const auth = getAuth(app);
 
 enum OperationType {
@@ -945,13 +947,17 @@ export default function App() {
     }
   };
 
-  const handleProfilePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleProfilePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (verificationStatus === 'approved' && !isProfileUnlocked) return;
     const file = e.target.files?.[0];
-    if (file) {
+    if (file && currentUser) {
       const reader = new FileReader();
-      reader.onloadend = () => {
-        setProfilePhoto(reader.result as string);
+      reader.onloadend = async () => {
+        const dataUrl = reader.result as string;
+        const storageRef = ref(storage, `users/${currentUser.uid}/profilePhoto/${file.name}`);
+        await uploadString(storageRef, dataUrl, 'data_url');
+        const downloadUrl = await getDownloadURL(storageRef);
+        setProfilePhoto(downloadUrl);
       };
       reader.readAsDataURL(file);
     }
@@ -960,11 +966,15 @@ export default function App() {
   const handleIdDocsUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (verificationStatus === 'approved' && !isProfileUnlocked) return;
     const files = e.target.files;
-    if (files) {
-      Array.from(files).forEach((file) => {
+    if (files && currentUser) {
+      Array.from(files).forEach(async (file) => {
         const reader = new FileReader();
-        reader.onloadend = () => {
-          setIdDocuments((prev) => [...prev, reader.result as string]);
+        reader.onloadend = async () => {
+          const dataUrl = reader.result as string;
+          const storageRef = ref(storage, `users/${currentUser.uid}/idDocuments/${file.name}`);
+          await uploadString(storageRef, dataUrl, 'data_url');
+          const downloadUrl = await getDownloadURL(storageRef);
+          setIdDocuments((prev) => [...prev, downloadUrl]);
         };
         reader.readAsDataURL(file);
       });
@@ -1077,6 +1087,20 @@ export default function App() {
         submittedAt: submissionTime,
         createdAt: existingData?.createdAt || submissionTime,
       };
+
+      // Diagnostic: Check document size
+      const serialized = JSON.stringify(profileData);
+      const sizeInBytes = new Blob([serialized]).size;
+      console.log('Diagnostic: Profile Data Size:', sizeInBytes, 'bytes');
+      
+      // Identify large fields
+      const fieldSizes = Object.keys(profileData).map(key => {
+        const val = (profileData as any)[key];
+        const strVal = typeof val === 'string' ? val : JSON.stringify(val);
+        return { field: key, size: new Blob([strVal]).size };
+      }).sort((a, b) => b.size - a.size);
+      
+      console.log('Diagnostic: Largest Fields:', fieldSizes.slice(0, 5));
 
       await setDoc(userRef, profileData, { merge: true });
       setCurrentUserProfile(profileData);
